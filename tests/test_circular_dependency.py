@@ -1,7 +1,12 @@
 """Tests for circular dependency detection in Parameters with expr."""
 
+import numpy as np
 import pytest
+from copy import deepcopy
+
 import lmfit
+from lmfit import Minimizer, Parameters
+from lmfit.models import GaussianModel
 
 
 class TestCircularDependency:
@@ -355,3 +360,120 @@ class TestCircularDependencyWithSerialization:
 
         with pytest.raises(ValueError, match="circular dependency"):
             params.add('b', value=2.0, expr='a')
+
+
+class TestCircularDependencyEndToEnd:
+    """Integration tests for circular dependency detection in end-to-end scenarios."""
+
+    def test_minimizer_prepare_fit_detects_circular(self):
+        """Test that Minimizer.prepare_fit detects circular dependencies before fitting."""
+
+        def objective(pars):
+            x = np.linspace(0, 10, 100)
+            return pars['a'] * x + pars['b']
+
+        params = Parameters()
+        params.add('a', value=1.0)
+        params.add('b', value=2.0)
+
+        params['a']._expr = 'b'
+        params['b']._expr = 'a'
+
+        minr = Minimizer(objective, params)
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            minr.prepare_fit()
+
+    def test_minimizer_scalar_minimize_detects_circular(self):
+        """Test that Minimizer.scalar_minimize detects circular dependencies early."""
+
+        def objective(pars):
+            x = np.linspace(0, 10, 100)
+            return (pars['a'] * x + pars['b'] - np.sin(x)) ** 2
+
+        params = Parameters()
+        params.add('a', value=1.0)
+        params.add('b', value=2.0)
+
+        params['a']._expr = 'b'
+        params['b']._expr = 'a'
+
+        minr = Minimizer(objective, params)
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            minr.scalar_minimize(method='Nelder-Mead')
+
+    def test_model_fit_detects_circular(self):
+        """Test that Model.fit detects circular dependencies before fitting starts."""
+        x = np.linspace(0, 10, 100)
+        y = 10 * np.exp(-(x - 5)**2 / 2) + np.random.normal(0, 0.1, size=x.size)
+
+        mod = GaussianModel()
+        params = mod.guess(y, x=x)
+
+        params['amplitude']._expr = 'sigma'
+        params['sigma']._expr = 'amplitude'
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            mod.fit(y, params, x=x)
+
+    def test_valid_chain_with_model_fit(self):
+        """Test that valid chain dependencies work correctly with Model.fit."""
+        x = np.linspace(0, 10, 100)
+        y = 10 * np.exp(-(x - 5)**2 / 4) + np.random.normal(0, 0.1, size=x.size)
+
+        mod = GaussianModel()
+        params = mod.guess(y, x=x)
+
+        if 'fwhm' in params:
+            params['fwhm'].expr = '2.3548 * sigma'
+        else:
+            params.add('fwhm', expr='2.3548 * sigma')
+
+        if 'height' not in params:
+            params.add('height', expr='0.3989 * amplitude / sigma')
+
+        result = mod.fit(y, params, x=x)
+
+        assert result.success
+        assert 'circular' not in str(result).lower()
+
+    def test_valid_chain_with_minimizer(self):
+        """Test that valid chain dependencies work correctly with Minimizer."""
+
+        def objective(pars):
+            x = np.linspace(0, 10, 100)
+            model = pars['amplitude'] * np.exp(-(x - pars['center'])**2 / (2 * pars['sigma']**2))
+            return model - 10 * np.exp(-(x - 5)**2 / 2)
+
+        params = Parameters()
+        params.add('amplitude', value=10.0)
+        params.add('center', value=5.0)
+        params.add('sigma', value=1.0)
+        params.add('fwhm', expr='2.3548 * sigma')
+        params.add('height', expr='0.3989 * amplitude / sigma')
+
+        minr = Minimizer(objective, params)
+        result = minr.scalar_minimize(method='Nelder-Mead')
+
+        assert result.success
+        assert abs(result.params['sigma'].value - 1.0) < 0.1
+
+    def test_circular_with_arithmetic_in_minimizer(self):
+        """Test that circular dependencies with arithmetic are detected in Minimizer."""
+
+        def objective(pars):
+            x = np.linspace(0, 10, 100)
+            return pars['a'] * x + pars['b']
+
+        params = Parameters()
+        params.add('a', value=1.0)
+        params.add('b', value=2.0)
+
+        params['a']._expr = '2*b + 1'
+        params['b']._expr = '3*a - 2'
+
+        minr = Minimizer(objective, params)
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            minr.prepare_fit()
