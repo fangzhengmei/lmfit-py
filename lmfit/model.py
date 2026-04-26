@@ -1231,6 +1231,12 @@ class CompositeModel(Model):
         -----
         The two models can use different independent variables.
 
+        All component models must have unique, non-empty prefixes. If two
+        or more components share the same prefix, a :exc:`NameError` will be
+        raised during :class:`CompositeModel` construction. This ensures
+        that parameters from different models do not silently overwrite each
+        other.
+
         """
         if not isinstance(left, Model):
             raise ValueError(f'CompositeModel: argument {left} is not a Model')

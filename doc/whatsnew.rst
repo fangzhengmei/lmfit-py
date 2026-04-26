@@ -29,6 +29,10 @@ Fixes:
 - fix cross-Python-version serialization of ``ConstantModel`` and
   ``ComplexConstantModel`` by moving their functions to ``lineshapes`` (Issue #1033)
 
+- raise :exc:`NameError` during :class:`CompositeModel` construction when two
+  component models share the same prefix; this prevents parameters from being
+  silently overwritten without warning. (Issue #10XX)
+
 .. _whatsnew_134_label:
 
 Version 1.3.4 Release Notes (2025-July-19)
