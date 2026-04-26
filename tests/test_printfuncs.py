@@ -740,3 +740,136 @@ def test_aic_bic_with_minimizer_custom_weights():
     report = fit_report(result)
     assert 'Akaike info crit' in report
     assert 'Bayesian info crit' in report
+
+
+class TestFitReportRobustness:
+    """Test fit_report robustness with nan/inf values in result.
+
+    These tests verify that fit_report can handle edge cases where
+    statistics (chisqr, redchi, aic, bic) might be nan or inf due
+    to fitting failures or numerical issues.
+    """
+
+    @pytest.fixture
+    def normal_result(self):
+        """Fixture providing a normally fitted ModelResult."""
+        np.random.seed(42)
+        x = np.linspace(0, 10, 101)
+        y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+        model = GaussianModel()
+        params = model.make_params(amplitude=8, center=4.5, sigma=1.2)
+        return model.fit(y, params, x=x)
+
+    @pytest.fixture
+    def normal_minimizer_result(self):
+        """Fixture providing a normally fitted MinimizerResult."""
+        np.random.seed(42)
+        x = np.linspace(0, 10, 101)
+        y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+        def residual(params, x, data):
+            amp = params['amplitude']
+            cen = params['center']
+            sig = params['sigma']
+            model = amp * np.exp(-(x-cen)**2 / (2*sig**2))
+            return model - data
+
+        params = Parameters()
+        params.add('amplitude', value=8.0)
+        params.add('center', value=4.5)
+        params.add('sigma', value=1.2)
+
+        mini = Minimizer(residual, params, fcn_args=(x,), fcn_kws={'data': y})
+        return mini.leastsq()
+
+    @pytest.mark.parametrize("attr,value,expected_str", [
+        ('aic', np.nan, 'nan'),
+        ('aic', np.inf, 'inf'),
+        ('aic', -np.inf, '-inf'),
+        ('bic', np.nan, 'nan'),
+        ('bic', np.inf, 'inf'),
+        ('chisqr', np.nan, 'nan'),
+        ('chisqr', np.inf, 'inf'),
+        ('redchi', np.nan, 'nan'),
+        ('redchi', np.inf, 'inf'),
+    ])
+    def test_getfloat_attr_with_nan_inf(self, normal_result, attr, value, expected_str):
+        """Test that getfloat_attr handles nan and inf values correctly."""
+        original_value = getattr(normal_result, attr)
+        setattr(normal_result, attr, value)
+        
+        formatted = getfloat_attr(normal_result, attr)
+        assert formatted == expected_str
+
+        setattr(normal_result, attr, original_value)
+
+    @pytest.mark.parametrize("modifications", [
+        {'aic': np.nan},
+        {'aic': np.inf},
+        {'aic': -np.inf},
+        {'bic': np.nan},
+        {'bic': np.inf},
+        {'chisqr': np.nan},
+        {'chisqr': np.inf},
+        {'redchi': np.nan},
+        {'redchi': np.inf},
+        {'chisqr': np.nan, 'redchi': np.nan, 'aic': np.nan, 'bic': np.nan},
+        {'chisqr': np.inf, 'redchi': np.inf, 'aic': np.inf, 'bic': np.inf},
+    ])
+    def test_fit_report_with_nan_inf_values(self, normal_result, modifications):
+        """Test that fit_report does not crash when statistics are nan or inf.
+
+        This simulates scenarios where fitting might fail or produce
+        numerically problematic results.
+        """
+        original_values = {k: getattr(normal_result, k) for k in modifications}
+
+        for key, value in modifications.items():
+            setattr(normal_result, key, value)
+
+        try:
+            report = fit_report(normal_result)
+            
+            assert '[[Fit Statistics]]' in report
+            
+            for key, value in modifications.items():
+                if np.isnan(value):
+                    assert 'nan' in report.lower()
+                elif np.isposinf(value):
+                    assert 'inf' in report.lower()
+                elif np.isneginf(value):
+                    assert '-inf' in report.lower()
+
+        finally:
+            for key, value in original_values.items():
+                setattr(normal_result, key, value)
+
+    def test_fit_report_with_minimizerresult_nan_inf(self, normal_minimizer_result):
+        """Test fit_report with MinimizerResult (not ModelResult) having nan/inf."""
+        original_aic = normal_minimizer_result.aic
+        original_bic = normal_minimizer_result.bic
+        
+        normal_minimizer_result.aic = np.nan
+        normal_minimizer_result.bic = np.inf
+        
+        try:
+            report = fit_report(normal_minimizer_result)
+            assert '[[Fit Statistics]]' in report
+            assert 'nan' in report.lower()
+            assert 'inf' in report.lower()
+        finally:
+            normal_minimizer_result.aic = original_aic
+            normal_minimizer_result.bic = original_bic
+
+    def test_fitreport_html_table_with_nan_inf(self, normal_result):
+        """Test that HTML report also handles nan/inf values."""
+        normal_result.chisqr = np.nan
+        normal_result.redchi = np.inf
+        normal_result.aic = np.nan
+        normal_result.bic = np.inf
+        
+        html = fitreport_html_table(normal_result)
+        
+        assert 'nan' in html.lower()
+        assert 'inf' in html.lower()
