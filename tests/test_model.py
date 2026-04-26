@@ -1271,6 +1271,85 @@ class TestUserDefiniedModel(CommonTests, unittest.TestCase):
         self.assertTrue(result.params['a'].value > 10)
         self.assertTrue(result.params['a'].value < 11)
 
+    def test_prefix_collision_same_model_type(self):
+        """Test that two models with same prefix raises NameError.
+
+        This tests that when two GaussianModels (same type) are combined
+        with the same prefix, a NameError is raised during CompositeModel
+        construction, not later during fitting.
+        """
+        g1 = GaussianModel(prefix='g1_')
+        g2 = GaussianModel(prefix='g1_')
+
+        msg = r"Model prefix 'g1_' is used by both"
+        self.assertRaisesRegex(NameError, msg, lambda: g1 + g2)
+
+    def test_prefix_collision_different_model_types(self):
+        """Test that different model types with same prefix raises NameError.
+
+        This tests that when different model types (e.g., GaussianModel and
+        LinearModel) are combined with the same prefix, a NameError is raised.
+        Even though their parameter names don't overlap, sharing the same prefix
+        is an error-prone pattern that should be detected early.
+        """
+        gauss = GaussianModel(prefix='p1_')
+        linear = models.LinearModel(prefix='p1_')
+
+        msg = r"Model prefix 'p1_' is used by both"
+        self.assertRaisesRegex(NameError, msg, lambda: gauss + linear)
+
+    def test_prefix_collision_nested_composite(self):
+        """Test that prefix collisions are detected in nested CompositeModels.
+
+        This tests that when building a nested CompositeModel, if a new model
+        has the same prefix as any existing component in the nested structure,
+        a NameError is raised.
+        """
+        g1 = GaussianModel(prefix='g1_')
+        g2 = GaussianModel(prefix='g2_')
+        g3 = GaussianModel(prefix='g1_')
+
+        comp1 = g1 + g2
+
+        msg = r"Model prefix 'g1_' is used by both"
+        self.assertRaisesRegex(NameError, msg, lambda: comp1 + g3)
+
+    def test_prefix_collision_deep_nested_composite(self):
+        """Test prefix collision detection in deeply nested CompositeModels.
+
+        This tests that collision detection works across multiple levels
+        of nesting, checking all leaf components.
+        """
+        g1 = GaussianModel(prefix='peak1_')
+        g2 = GaussianModel(prefix='peak2_')
+        bkg = models.LinearModel(prefix='bkg_')
+
+        comp1 = g1 + g2
+        comp2 = comp1 + bkg
+
+        g3 = GaussianModel(prefix='peak1_')
+
+        msg = r"Model prefix 'peak1_' is used by both"
+        self.assertRaisesRegex(NameError, msg, lambda: comp2 + g3)
+
+    def test_different_prefixes_work_correctly(self):
+        """Test that models with different prefixes work correctly.
+
+        This is a sanity check to ensure that our collision detection
+        doesn't break the normal case where models have distinct prefixes.
+        """
+        g1 = GaussianModel(prefix='g1_')
+        g2 = GaussianModel(prefix='g2_')
+
+        try:
+            model = g1 + g2
+        except NameError as e:
+            self.fail(f"Unexpected NameError with different prefixes: {e}")
+
+        self.assertIn('g1_amplitude', model.param_names)
+        self.assertIn('g2_amplitude', model.param_names)
+        self.assertEqual(len(model.param_names), 6)
+
     def test_composite_model_with_expr_constrains(self):
         """Smoke test for composite model fitting with expr constraints."""
         y = [0, 0, 4, 2, 1, 8, 21, 21, 23, 35, 50, 54, 46, 70, 77, 87, 98,
