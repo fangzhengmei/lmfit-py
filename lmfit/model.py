@@ -1243,12 +1243,33 @@ class CompositeModel(Model):
         self.right = right
         self.op = op
 
+        all_components = left.components + right.components
+        prefixes = [comp.prefix for comp in all_components if comp.prefix]
+        if len(prefixes) != len(set(prefixes)):
+            seen = {}
+            duplicates = []
+            for comp in all_components:
+                prefix = comp.prefix
+                if not prefix:
+                    continue
+                if prefix in seen:
+                    duplicates.append((seen[prefix], comp, prefix))
+                else:
+                    seen[prefix] = comp
+            if duplicates:
+                msg = ''
+                for model1, model2, prefix in duplicates:
+                    msg += (f"\nModel prefix '{prefix}' is used by both "
+                            f"'{model1._name}' and '{model2._name}'; "
+                            "use distinct prefixes.")
+                raise NameError(msg)
+
         name_collisions = set(left.param_names) & set(right.param_names)
         if len(name_collisions) > 0:
             msg = ''
             for collision in name_collisions:
                 msg += (f"\nTwo models have parameters named '{collision}'; "
-                        "use distinct names.")
+                        "use distinct prefixes.")
             raise NameError(msg)
 
         # the unique ``independent_vars`` of the left and right model are
