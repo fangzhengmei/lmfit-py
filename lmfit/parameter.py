@@ -271,6 +271,17 @@ class Parameters(dict):
             describing the cycle.
 
         """
+        from asteval import get_ast_names
+
+        for name, par in self.items():
+            if par._expr is not None and (par._expr_ast is None or not par._expr_deps):
+                if par._expr_eval is not None:
+                    try:
+                        par._expr_ast = par._expr_eval.parse(par._expr)
+                        par._expr_deps = get_ast_names(par._expr_ast)
+                    except Exception:
+                        pass
+
         visited = set()
         recursion_stack = []
 

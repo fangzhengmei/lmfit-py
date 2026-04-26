@@ -258,3 +258,100 @@ class TestCircularDependencyRealWorld:
         assert params['part_b'].value == 70.0
         assert params['total'].value == 100.0
         assert params['ratio'].value == 0.3
+
+
+class TestCircularDependencyWithCopy:
+    """Test cases for circular dependency detection with copy operations."""
+
+    def test_copy_valid_params(self):
+        """Test that copying valid params works correctly."""
+        from copy import deepcopy
+
+        params = lmfit.Parameters()
+        params.add('c', value=2.0)
+        params.add('b', expr='3*c')
+        params.add('a', expr='2*b')
+
+        params_copy = deepcopy(params)
+
+        assert params_copy['a'].value == 12.0
+        assert params_copy['b'].value == 6.0
+        assert params_copy['c'].value == 2.0
+
+    def test_copy_then_create_circular(self):
+        """Test that creating circular dependency in copy is detected."""
+        from copy import deepcopy
+
+        params = lmfit.Parameters()
+        params.add('a', value=1.0)
+        params.add('b', value=2.0)
+        params['a'].expr = '2*b'
+
+        params_copy = deepcopy(params)
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            params_copy['b'].expr = '3*a'
+
+    def test_update_constraints_detects_circular(self):
+        """Test that update_constraints detects circular dependencies."""
+        params = lmfit.Parameters()
+        params.add('a', value=1.0)
+        params.add('b', value=2.0)
+
+        params['a']._expr = 'b'
+        params['b']._expr = 'a'
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            params.update_constraints()
+
+
+class TestCircularDependencyWithSerialization:
+    """Test cases for circular dependency detection with dumps/loads."""
+
+    def test_dumps_loads_valid_params(self):
+        """Test that serialization/deserialization of valid params works."""
+        params = lmfit.Parameters()
+        params.add('c', value=2.0)
+        params.add('b', expr='3*c')
+        params.add('a', expr='2*b')
+
+        json_str = params.dumps()
+        params_loaded = lmfit.Parameters().loads(json_str)
+
+        assert params_loaded['a'].value == 12.0
+        assert params_loaded['b'].value == 6.0
+        assert params_loaded['c'].value == 2.0
+
+    def test_loads_then_create_circular(self):
+        """Test that creating circular dependency after loads is detected."""
+        params = lmfit.Parameters()
+        params.add('a', value=1.0)
+        params.add('b', value=2.0)
+        params['a'].expr = '2*b'
+
+        json_str = params.dumps()
+        params_loaded = lmfit.Parameters().loads(json_str)
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            params_loaded['b'].expr = '3*a'
+
+    def test_add_many_with_circular_expr(self):
+        """Test that add_many detects circular dependencies."""
+        params = lmfit.Parameters()
+        par_a = lmfit.Parameter('a', value=1.0)
+        par_b = lmfit.Parameter('b', value=2.0)
+
+        par_a.expr = 'b'
+        par_b.expr = 'a'
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            params.add_many(par_a, par_b)
+
+    def test_add_with_circular_expr(self):
+        """Test that add method detects circular dependencies."""
+        params = lmfit.Parameters()
+        params.add('a', value=1.0)
+        params['a'].expr = 'b'
+
+        with pytest.raises(ValueError, match="circular dependency"):
+            params.add('b', value=2.0, expr='a')
