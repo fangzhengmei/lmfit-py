@@ -496,3 +496,145 @@ def test_fit_report_contains_aic_bic():
     assert '=' in bic_line
     assert aic_line.index('=') == chisqr_line.index('=')
     assert bic_line.index('=') == chisqr_line.index('=')
+
+
+def test_aic_bic_nvarys_zero():
+    """Test AIC and BIC when all parameters are fixed (nvarys=0).
+
+    When nvarys=0:
+    - AIC = N * ln(chi^2/N) + 2 * 0 = N * ln(chi^2/N)
+    - BIC = N * ln(chi^2/N) + ln(N) * 0 = N * ln(chi^2/N)
+    So AIC and BIC should be equal.
+    """
+    np.random.seed(42)
+    x = np.linspace(0, 10, 101)
+    y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+    def residual(params, x, data):
+        amp = params['amplitude']
+        cen = params['center']
+        sig = params['sigma']
+        model = amp * np.exp(-(x-cen)**2 / (2*sig**2))
+        return model - data
+
+    params_all_fixed = Parameters()
+    params_all_fixed.add('amplitude', value=10.0, vary=False)
+    params_all_fixed.add('center', value=5.0, vary=False)
+    params_all_fixed.add('sigma', value=1.0, vary=False)
+
+    mini = Minimizer(residual, params_all_fixed, fcn_args=(x,), fcn_kws={'data': y})
+    result = mini.leastsq()
+
+    assert result.nvarys == 0
+    assert result.ndata == 101
+
+    ndata = result.ndata
+    nvarys = result.nvarys
+    chisqr = result.chisqr
+
+    _neg2_log_likel = ndata * np.log(chisqr / ndata)
+    expected_aic = _neg2_log_likel + 2 * nvarys
+    expected_bic = _neg2_log_likel + np.log(ndata) * nvarys
+
+    assert np.allclose(result.aic, expected_aic, rtol=1e-10)
+    assert np.allclose(result.bic, expected_bic, rtol=1e-10)
+
+    assert np.allclose(result.aic, result.bic, rtol=1e-10)
+
+    report = fit_report(result)
+    assert 'Akaike info crit' in report
+    assert 'Bayesian info crit' in report
+    assert 'variables        = 0' in report
+
+
+@pytest.mark.parametrize("method,method_name", [
+    ('Nelder-Mead', 'Nelder-Mead'),
+    ('L-BFGS-B', 'L-BFGS-B'),
+])
+def test_aic_bic_with_different_optimization_methods(method, method_name):
+    """Test AIC and BIC calculations with different optimization methods."""
+    np.random.seed(42)
+    x = np.linspace(0, 10, 101)
+    y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+    def residual(params, x, data):
+        amp = params['amplitude']
+        cen = params['center']
+        sig = params['sigma']
+        model = amp * np.exp(-(x-cen)**2 / (2*sig**2))
+        return model - data
+
+    params = Parameters()
+    params.add('amplitude', value=8.0, min=0, max=100)
+    params.add('center', value=4.5, min=0, max=10)
+    params.add('sigma', value=1.2, min=0.1, max=10)
+
+    mini = Minimizer(residual, params, fcn_args=(x,), fcn_kws={'data': y})
+    result = mini.scalar_minimize(method=method)
+
+    assert result.method == method_name
+    assert result.nvarys == 3
+
+    ndata = result.ndata
+    nvarys = result.nvarys
+    chisqr = result.chisqr
+
+    _neg2_log_likel = ndata * np.log(chisqr / ndata)
+    expected_aic = _neg2_log_likel + 2 * nvarys
+    expected_bic = _neg2_log_likel + np.log(ndata) * nvarys
+
+    assert np.allclose(result.aic, expected_aic, rtol=1e-10)
+    assert np.allclose(result.bic, expected_bic, rtol=1e-10)
+
+    report = fit_report(result)
+    assert 'Akaike info crit' in report
+    assert 'Bayesian info crit' in report
+
+    lines = report.split('\n')
+    aic_line = None
+    bic_line = None
+    chisqr_line = None
+
+    for line in lines:
+        if 'Akaike info crit' in line:
+            aic_line = line
+        elif 'Bayesian info crit' in line:
+            bic_line = line
+        elif 'chi-square         =' in line:
+            chisqr_line = line
+
+    assert aic_line is not None
+    assert bic_line is not None
+    assert chisqr_line is not None
+
+    assert aic_line.index('=') == chisqr_line.index('=')
+    assert bic_line.index('=') == chisqr_line.index('=')
+
+
+@pytest.mark.parametrize("model_method", ['nelder', 'lbfgsb'])
+def test_aic_bic_model_interface_methods(model_method):
+    """Test AIC and BIC using Model interface with different methods."""
+    np.random.seed(42)
+    x = np.linspace(0, 10, 101)
+    y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+    model = GaussianModel()
+    params = model.make_params(amplitude=8, center=4.5, sigma=1.2)
+    result = model.fit(y, params, x=x, method=model_method)
+
+    assert result.nvarys == 3
+
+    ndata = result.ndata
+    nvarys = result.nvarys
+    chisqr = result.chisqr
+
+    _neg2_log_likel = ndata * np.log(chisqr / ndata)
+    expected_aic = _neg2_log_likel + 2 * nvarys
+    expected_bic = _neg2_log_likel + np.log(ndata) * nvarys
+
+    assert np.allclose(result.aic, expected_aic, rtol=1e-10)
+    assert np.allclose(result.bic, expected_bic, rtol=1e-10)
+
+    report = result.fit_report()
+    assert 'Akaike info crit' in report
+    assert 'Bayesian info crit' in report
