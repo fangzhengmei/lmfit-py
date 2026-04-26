@@ -262,13 +262,50 @@ class Parameters(dict):
         """Check for circular dependencies in parameter expressions.
 
         This method uses depth-first search to detect cycles in the
-        dependency graph of parameters with expressions.
+        dependency graph of parameters with expressions. It is called
+        automatically by :meth:`update_constraints` and when setting
+        a parameter's :attr:`expr` attribute.
 
         Raises
         ------
         ValueError
-            If a circular dependency is detected, with a message
-            describing the cycle.
+            If a circular dependency is detected in parameter expressions.
+            The error message describes the cycle path.
+
+        Examples
+        --------
+        Direct circular dependency:
+
+        >>> params = lmfit.Parameters()
+        >>> params.add('a', value=1.0)
+        >>> params.add('b', value=2.0)
+        >>> params['a'].expr = 'b'
+        >>> params['b'].expr = 'a'  # Raises ValueError
+        Traceback (most recent call last):
+            ...
+        ValueError: circular dependency detected in parameter expressions: 'a' -> 'b' -> 'a'
+
+        Indirect circular dependency:
+
+        >>> params = lmfit.Parameters()
+        >>> params.add('a', value=1.0)
+        >>> params.add('b', value=2.0)
+        >>> params.add('c', value=3.0)
+        >>> params['a'].expr = 'b'
+        >>> params['b'].expr = 'c'
+        >>> params['c'].expr = 'a'  # Raises ValueError
+        Traceback (most recent call last):
+            ...
+        ValueError: circular dependency detected in parameter expressions: 'a' -> 'b' -> 'c' -> 'a'
+
+        Self-referential dependency:
+
+        >>> params = lmfit.Parameters()
+        >>> params.add('a', value=1.0)
+        >>> params['a'].expr = 'a'  # Raises ValueError
+        Traceback (most recent call last):
+            ...
+        ValueError: circular dependency detected in parameter expressions: 'a' -> 'a'
 
         """
         from asteval import get_ast_names
@@ -339,6 +376,28 @@ class Parameters(dict):
         """Update all constrained parameters.
 
         This method ensures that dependencies are evaluated as needed.
+        It first checks for circular dependencies in parameter expressions.
+
+        Raises
+        ------
+        ValueError
+            If a circular dependency is detected in parameter expressions.
+            The error message will describe the cycle, for example:
+            "circular dependency detected in parameter expressions: 'a' -> 'b' -> 'a'"
+
+        Examples
+        --------
+        >>> params = lmfit.Parameters()
+        >>> params.add('a', value=1.0)
+        >>> params.add('b', value=2.0)
+        >>> params['a'].expr = '2*b'
+        >>> params.update_constraints()  # OK: valid chain
+        >>> params['a'].value
+        4.0
+        >>> params['b'].expr = '3*a'  # This creates a cycle
+        Traceback (most recent call last):
+            ...
+        ValueError: circular dependency detected in parameter expressions: 'a' -> 'b' -> 'a'
 
         """
         self._check_circular_dependencies()
@@ -1120,14 +1179,103 @@ class Parameter:
 
     @property
     def expr(self):
-        """Return the mathematical expression used to constrain the value in fit."""
+        """Return the mathematical expression used to constrain the value in fit.
+
+        Returns
+        -------
+        str or None
+            The mathematical expression string, or None if no expression is set.
+
+        See Also
+        --------
+        vary : Whether the parameter is varied during fit.
+        _check_circular_dependencies : Method that detects circular dependencies.
+
+        Notes
+        -----
+        When setting this attribute, the parameter is automatically marked as
+        not varying (:attr:`vary` = False). Setting an empty string ('') removes
+        the expression constraint.
+
+        Circular dependencies in expressions are detected and raise ValueError.
+        For example, if 'a' depends on 'b' and 'b' depends on 'a', this
+        will be detected immediately when setting the second expression.
+
+        Examples
+        --------
+        >>> import lmfit
+        >>> params = lmfit.Parameters()
+        >>> params.add('a', value=1.0)
+        >>> params.add('b', value=2.0)
+
+        Valid chain dependency:
+
+        >>> params['a'].expr = '2*b'
+        >>> params['a'].value
+        4.0
+        >>> params['a'].expr
+        '2*b'
+
+        Circular dependency (raises ValueError):
+
+        >>> params['b'].expr = '3*a'  # Creates a cycle: a -> b -> a
+        Traceback (most recent call last):
+            ...
+        ValueError: circular dependency detected in parameter expressions: 'a' -> 'b' -> 'a'
+
+        Removing the constraint:
+
+        >>> params['a'].expr = ''
+        >>> params['a'].expr is None
+        True
+        >>> params['a'].vary
+        True
+
+        """
         return self._expr
 
     @expr.setter
     def expr(self, val):
         """Set the mathematical expression used to constrain the value in fit.
 
-        To remove a constraint you must supply an empty string.
+        Parameters
+        ----------
+        val : str or None
+            Mathematical expression used to constrain the value during fit.
+            Use an empty string ('') to remove the constraint.
+
+        Raises
+        ------
+        ValueError
+            If a circular dependency is detected among parameter expressions.
+
+        See Also
+        --------
+        vary : Whether the parameter is varied during fit.
+        _check_circular_dependencies : Method that detects circular dependencies.
+
+        Notes
+        -----
+        When setting this attribute:
+        - The parameter is automatically marked as not varying (:attr:`vary` = False)
+        - Setting an empty string ('') removes the expression constraint
+        - Circular dependencies are detected immediately
+
+        Examples
+        --------
+        >>> import lmfit
+        >>> params = lmfit.Parameters()
+        >>> params.add('a', value=1.0)
+        >>> params.add('b', value=2.0)
+
+        >>> params['a'].expr = '2*b'
+        >>> params['a'].value
+        4.0
+
+        >>> params['b'].expr = 'a'  # Creates a cycle: a -> b -> a
+        Traceback (most recent call last):
+            ...
+        ValueError: circular dependency detected in parameter expressions: 'a' -> 'b' -> 'a'
 
         """
         self.__set_expression(val)
