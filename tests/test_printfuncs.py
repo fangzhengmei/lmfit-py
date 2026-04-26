@@ -873,3 +873,89 @@ class TestFitReportRobustness:
         
         assert 'nan' in html.lower()
         assert 'inf' in html.lower()
+
+    @pytest.mark.parametrize("modifications", [
+        {'aic': np.nan},
+        {'aic': np.inf},
+        {'aic': -np.inf},
+        {'bic': np.nan},
+        {'bic': np.inf},
+        {'chisqr': np.nan},
+        {'chisqr': np.inf},
+        {'redchi': np.nan},
+        {'redchi': np.inf},
+        {'chisqr': np.nan, 'redchi': np.nan, 'aic': np.nan, 'bic': np.nan},
+        {'chisqr': np.inf, 'redchi': np.inf, 'aic': np.inf, 'bic': np.inf},
+    ])
+    def test_fitreport_html_table_with_various_nan_inf(self, normal_result, modifications):
+        """Test that HTML report handles various nan/inf scenarios without crashing.
+
+        This tests fitreport_html_table, which generates HTML output for Jupyter notebooks.
+        """
+        original_values = {k: getattr(normal_result, k) for k in modifications}
+
+        for key, value in modifications.items():
+            setattr(normal_result, key, value)
+
+        try:
+            html = fitreport_html_table(normal_result)
+            
+            assert 'Fit Statistics' in html
+            
+            for key, value in modifications.items():
+                if np.isnan(value):
+                    assert 'nan' in html.lower()
+                elif np.isposinf(value):
+                    assert 'inf' in html.lower()
+                elif np.isneginf(value):
+                    assert '-inf' in html.lower()
+
+        finally:
+            for key, value in original_values.items():
+                setattr(normal_result, key, value)
+
+    def test_fitreport_html_table_with_minimizerresult(self, normal_minimizer_result):
+        """Test HTML report with MinimizerResult (not ModelResult) having nan/inf."""
+        original_aic = normal_minimizer_result.aic
+        original_bic = normal_minimizer_result.bic
+        
+        normal_minimizer_result.aic = np.nan
+        normal_minimizer_result.bic = np.inf
+        
+        try:
+            html = fitreport_html_table(normal_minimizer_result)
+            assert 'Fit Statistics' in html
+            assert 'nan' in html.lower()
+            assert 'inf' in html.lower()
+        finally:
+            normal_minimizer_result.aic = original_aic
+            normal_minimizer_result.bic = original_bic
+
+    @pytest.mark.parametrize("attr,value", [
+        ('aic', np.nan),
+        ('aic', np.inf),
+        ('aic', -np.inf),
+        ('bic', np.nan),
+        ('bic', np.inf),
+    ])
+    def test_fitreport_html_table_aic_bic_specific(self, normal_result, attr, value):
+        """Specifically test AIC/BIC values in HTML report when they are nan or inf."""
+        original_value = getattr(normal_result, attr)
+        setattr(normal_result, attr, value)
+        
+        try:
+            html = fitreport_html_table(normal_result)
+            
+            if attr == 'aic':
+                assert 'Akaike info crit' in html
+            elif attr == 'bic':
+                assert 'Bayesian info crit' in html
+            
+            if np.isnan(value):
+                assert 'nan' in html.lower()
+            elif np.isposinf(value):
+                assert 'inf' in html.lower()
+            elif np.isneginf(value):
+                assert '-inf' in html.lower()
+        finally:
+            setattr(normal_result, attr, original_value)
