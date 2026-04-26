@@ -172,6 +172,7 @@ class Parameters(dict):
         dict.__setitem__(self, key, par)
         par.name = key
         par._expr_eval = self._asteval
+        par._params = self
         self._asteval.symtable[key] = float(par.value)
 
     def __add__(self, other):
@@ -257,12 +258,80 @@ class Parameters(dict):
         """
         return self._asteval.eval(expr)
 
+    def _check_circular_dependencies(self):
+        """Check for circular dependencies in parameter expressions.
+
+        This method uses depth-first search to detect cycles in the
+        dependency graph of parameters with expressions.
+
+        Raises
+        ------
+        ValueError
+            If a circular dependency is detected, with a message
+            describing the cycle.
+
+        """
+        visited = set()
+        recursion_stack = []
+
+        def _visit(param_name):
+            """Visit a parameter and check its dependencies for cycles.
+
+            Parameters
+            ----------
+            param_name : str
+                Name of the parameter to visit.
+
+            Returns
+            -------
+            list or None
+                If a cycle is found, returns the list of parameter names
+                forming the cycle. Otherwise returns None.
+
+            """
+            if param_name in visited:
+                return None
+
+            if param_name in recursion_stack:
+                idx = recursion_stack.index(param_name)
+                return recursion_stack[idx:] + [param_name]
+
+            if param_name not in self:
+                return None
+
+            par = self[param_name]
+            if par._expr is None:
+                visited.add(param_name)
+                return None
+
+            recursion_stack.append(param_name)
+
+            for dep in par._expr_deps:
+                cycle = _visit(dep)
+                if cycle is not None:
+                    return cycle
+
+            recursion_stack.pop()
+            visited.add(param_name)
+            return None
+
+        for name in self:
+            cycle = _visit(name)
+            if cycle is not None:
+                cycle_str = " -> ".join(f"'{p}'" for p in cycle)
+                raise ValueError(
+                    f"circular dependency detected in parameter expressions: "
+                    f"{cycle_str}"
+                )
+
     def update_constraints(self):
         """Update all constrained parameters.
 
         This method ensures that dependencies are evaluated as needed.
 
         """
+        self._check_circular_dependencies()
+
         requires_update = {name for name, par in self.items() if par._expr is
                            not None}
         updated_tracker = set(requires_update)
@@ -1060,6 +1129,8 @@ class Parameter:
             self._vary = False
         if not hasattr(self, '_expr_eval'):
             self._expr_eval = None
+        if not hasattr(self, '_params'):
+            self._params = None
         if val is None:
             self._expr_ast = None
         if val is not None and self._expr_eval is not None:
@@ -1068,6 +1139,8 @@ class Parameter:
             self._expr_ast = self._expr_eval.parse(val)
             check_ast_errors(self._expr_eval)
             self._expr_deps = get_ast_names(self._expr_ast)
+            if self._params is not None:
+                self._params._check_circular_dependencies()
 
     def __array__(self):
         """array"""
