@@ -638,3 +638,105 @@ def test_aic_bic_model_interface_methods(model_method):
     report = result.fit_report()
     assert 'Akaike info crit' in report
     assert 'Bayesian info crit' in report
+
+
+@pytest.mark.parametrize("weight_type", ['constant', 'varying'])
+def test_aic_bic_with_weights(weight_type):
+    """Test AIC and BIC calculations with weighted fitting.
+
+    In weighted fitting:
+    - residual = weights * (data - model)
+    - chisqr = sum(residual^2) = sum(weights^2 * (data - model)^2)
+    - AIC = N * ln(chisqr/N) + 2 * k
+    - BIC = N * ln(chisqr/N) + ln(N) * k
+
+    This test verifies that the formulas still hold when using weights.
+    """
+    np.random.seed(42)
+    x = np.linspace(0, 10, 101)
+    y_true = 10 * np.exp(-(x-5)**2 / (2*1**2))
+    y = y_true + np.random.normal(0, 0.1, x.size)
+
+    if weight_type == 'constant':
+        weights = 10.0
+    else:
+        weights = 5.0 + 15.0 * np.random.rand(x.size)
+
+    model = GaussianModel()
+    params = model.make_params(amplitude=8, center=4.5, sigma=1.2)
+    result = model.fit(y, params, x=x, weights=weights)
+
+    assert result.nvarys == 3
+    assert result.ndata == 101
+
+    residual = y - result.best_fit
+    if isinstance(weights, np.ndarray):
+        weighted_residual = weights * residual
+    else:
+        weighted_residual = weights * residual
+    manual_chisqr = (weighted_residual**2).sum()
+    assert np.allclose(result.chisqr, manual_chisqr, rtol=1e-10)
+
+    ndata = result.ndata
+    nvarys = result.nvarys
+    chisqr = result.chisqr
+
+    _neg2_log_likel = ndata * np.log(chisqr / ndata)
+    expected_aic = _neg2_log_likel + 2 * nvarys
+    expected_bic = _neg2_log_likel + np.log(ndata) * nvarys
+
+    assert np.allclose(result.aic, expected_aic, rtol=1e-10)
+    assert np.allclose(result.bic, expected_bic, rtol=1e-10)
+
+    report = fit_report(result)
+    assert 'Akaike info crit' in report
+    assert 'Bayesian info crit' in report
+
+
+def test_aic_bic_with_minimizer_custom_weights():
+    """Test AIC/BIC with Minimizer directly using custom weighted residual.
+
+    This test verifies that when using a custom residual function with
+    Minimizer (which already includes the weights in the residual),
+    the AIC/BIC calculations are still correct.
+    """
+    np.random.seed(42)
+    x = np.linspace(0, 10, 101)
+    y_true = 10 * np.exp(-(x-5)**2 / (2*1**2))
+    y = y_true + np.random.normal(0, 0.1, x.size)
+
+    weights_varying = 5.0 + 15.0 * np.random.rand(x.size)
+
+    def residual_weighted(params, x, data, weights):
+        amp = params['amplitude']
+        cen = params['center']
+        sig = params['sigma']
+        model = amp * np.exp(-(x-cen)**2 / (2*sig**2))
+        return weights * (model - data)
+
+    params = Parameters()
+    params.add('amplitude', value=8.0)
+    params.add('center', value=4.5)
+    params.add('sigma', value=1.2)
+
+    mini = Minimizer(residual_weighted, params, fcn_args=(x, y),
+                      fcn_kws={'weights': weights_varying})
+    result = mini.leastsq()
+
+    assert result.nvarys == 3
+    assert result.ndata == 101
+
+    ndata = result.ndata
+    nvarys = result.nvarys
+    chisqr = result.chisqr
+
+    _neg2_log_likel = ndata * np.log(chisqr / ndata)
+    expected_aic = _neg2_log_likel + 2 * nvarys
+    expected_bic = _neg2_log_likel + np.log(ndata) * nvarys
+
+    assert np.allclose(result.aic, expected_aic, rtol=1e-10)
+    assert np.allclose(result.bic, expected_bic, rtol=1e-10)
+
+    report = fit_report(result)
+    assert 'Akaike info crit' in report
+    assert 'Bayesian info crit' in report
