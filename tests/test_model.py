@@ -1276,13 +1276,19 @@ class TestUserDefiniedModel(CommonTests, unittest.TestCase):
 
         This tests that when two GaussianModels (same type) are combined
         with the same prefix, a NameError is raised during CompositeModel
-        construction, not later during fitting.
+        construction, not later during fitting. The error message should
+        contain the conflicting prefix and both model names.
         """
         g1 = GaussianModel(prefix='g1_')
         g2 = GaussianModel(prefix='g1_')
 
-        msg = r"Model prefix 'g1_' is used by both"
-        self.assertRaisesRegex(NameError, msg, lambda: g1 + g2)
+        with pytest.raises(NameError) as exc_info:
+            g1 + g2
+
+        error_msg = str(exc_info.value)
+        assert "Model prefix 'g1_'" in error_msg
+        assert "'gaussian'" in error_msg
+        assert "and 'gaussian'" in error_msg
 
     def test_prefix_collision_different_model_types(self):
         """Test that different model types with same prefix raises NameError.
@@ -1290,20 +1296,27 @@ class TestUserDefiniedModel(CommonTests, unittest.TestCase):
         This tests that when different model types (e.g., GaussianModel and
         LinearModel) are combined with the same prefix, a NameError is raised.
         Even though their parameter names don't overlap, sharing the same prefix
-        is an error-prone pattern that should be detected early.
+        is an error-prone pattern that should be detected early. The error
+        message should contain the conflicting prefix and both model names.
         """
         gauss = GaussianModel(prefix='p1_')
         linear = models.LinearModel(prefix='p1_')
 
-        msg = r"Model prefix 'p1_' is used by both"
-        self.assertRaisesRegex(NameError, msg, lambda: gauss + linear)
+        with pytest.raises(NameError) as exc_info:
+            gauss + linear
+
+        error_msg = str(exc_info.value)
+        assert "Model prefix 'p1_'" in error_msg
+        assert "'gaussian'" in error_msg
+        assert "'linear'" in error_msg
 
     def test_prefix_collision_nested_composite(self):
         """Test that prefix collisions are detected in nested CompositeModels.
 
         This tests that when building a nested CompositeModel, if a new model
         has the same prefix as any existing component in the nested structure,
-        a NameError is raised.
+        a NameError is raised. The error message should contain the conflicting
+        prefix and both model names.
         """
         g1 = GaussianModel(prefix='g1_')
         g2 = GaussianModel(prefix='g2_')
@@ -1311,8 +1324,11 @@ class TestUserDefiniedModel(CommonTests, unittest.TestCase):
 
         comp1 = g1 + g2
 
-        msg = r"Model prefix 'g1_' is used by both"
-        self.assertRaisesRegex(NameError, msg, lambda: comp1 + g3)
+        with pytest.raises(NameError) as exc_info:
+            comp1 + g3
+
+        error_msg = str(exc_info.value)
+        assert "Model prefix 'g1_'" in error_msg
 
     def test_prefix_collision_deep_nested_composite(self):
         """Test prefix collision detection in deeply nested CompositeModels.
@@ -1329,8 +1345,32 @@ class TestUserDefiniedModel(CommonTests, unittest.TestCase):
 
         g3 = GaussianModel(prefix='peak1_')
 
-        msg = r"Model prefix 'peak1_' is used by both"
-        self.assertRaisesRegex(NameError, msg, lambda: comp2 + g3)
+        with pytest.raises(NameError) as exc_info:
+            comp2 + g3
+
+        error_msg = str(exc_info.value)
+        assert "Model prefix 'peak1_'" in error_msg
+
+    def test_prefix_collision_multiple_conflicts(self):
+        """Test that multiple prefix conflicts are all listed in error message.
+
+        This tests that when combining models results in multiple prefix conflicts,
+        the error message lists all conflicting pairs, not just the first one.
+        """
+        g1 = GaussianModel(prefix='g1_')
+        g2 = GaussianModel(prefix='g2_')
+        g3 = GaussianModel(prefix='g1_')
+        g4 = GaussianModel(prefix='g2_')
+
+        comp1 = g1 + g2
+        comp2 = g3 + g4
+
+        with pytest.raises(NameError) as exc_info:
+            comp1 + comp2
+
+        error_msg = str(exc_info.value)
+        assert "Model prefix 'g1_'" in error_msg
+        assert "Model prefix 'g2_'" in error_msg
 
     def test_different_prefixes_work_correctly(self):
         """Test that models with different prefixes work correctly.
