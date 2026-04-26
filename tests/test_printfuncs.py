@@ -408,3 +408,91 @@ def test_ci_report_with_ndigits(confidence_interval, ndigits):
     period_values = list(report_split[2].split()[2:])
     length = [len(val.split('.')[-1]) for val in period_values]
     assert np.all(np.equal(length, ndigits))
+
+
+def test_aic_bic_numerical_correctness():
+    """Test that AIC and BIC are calculated correctly.
+
+    According to the formulas in the code:
+    - AIC = N * ln(chi^2/N) + 2 * k
+    - BIC = N * ln(chi^2/N) + ln(N) * k
+
+    where:
+    - N = ndata (number of data points)
+    - k = nvarys (number of variable parameters)
+    - chi^2 = chisqr (chi-square value)
+    """
+    np.random.seed(42)
+    x = np.linspace(0, 10, 101)
+    y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+    def residual(params, x, data):
+        amp = params['amplitude']
+        cen = params['center']
+        sig = params['sigma']
+        model = amp * np.exp(-(x-cen)**2 / (2*sig**2))
+        return model - data
+
+    params = Parameters()
+    params.add('amplitude', value=8)
+    params.add('center', value=4.5)
+    params.add('sigma', value=1.2)
+
+    mini = Minimizer(residual, params, fcn_args=(x,), fcn_kws={'data': y})
+    result = mini.leastsq()
+
+    ndata = result.ndata
+    nvarys = result.nvarys
+    chisqr = result.chisqr
+
+    _neg2_log_likel = ndata * np.log(chisqr / ndata)
+    expected_aic = _neg2_log_likel + 2 * nvarys
+    expected_bic = _neg2_log_likel + np.log(ndata) * nvarys
+
+    assert np.allclose(result.aic, expected_aic, rtol=1e-10)
+    assert np.allclose(result.bic, expected_bic, rtol=1e-10)
+
+
+def test_fit_report_contains_aic_bic():
+    """Test that fit_report contains AIC and BIC statistics."""
+    np.random.seed(123)
+    x = np.linspace(0, 10, 101)
+    y = 10 * np.exp(-(x-5)**2 / (2*1**2)) + np.random.normal(0, 0.1, x.size)
+
+    model = GaussianModel()
+    params = model.make_params(amplitude=8, center=4.5, sigma=1.2)
+    result = model.fit(y, params, x=x)
+
+    report = fit_report(result)
+
+    assert 'Akaike info crit' in report
+    assert 'Bayesian info crit' in report
+
+    assert 'chi-square' in report
+    assert 'reduced chi-square' in report
+
+    lines = report.split('\n')
+    aic_line = None
+    bic_line = None
+    chisqr_line = None
+    redchi_line = None
+
+    for line in lines:
+        if 'Akaike info crit' in line:
+            aic_line = line
+        elif 'Bayesian info crit' in line:
+            bic_line = line
+        elif 'chi-square         =' in line:
+            chisqr_line = line
+        elif 'reduced chi-square =' in line:
+            redchi_line = line
+
+    assert aic_line is not None
+    assert bic_line is not None
+    assert chisqr_line is not None
+    assert redchi_line is not None
+
+    assert '=' in aic_line
+    assert '=' in bic_line
+    assert aic_line.index('=') == chisqr_line.index('=')
+    assert bic_line.index('=') == chisqr_line.index('=')
