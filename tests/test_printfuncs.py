@@ -3,8 +3,9 @@ import numpy as np
 import pytest
 
 import lmfit
-from lmfit import (Minimizer, Parameters, ci_report, conf_interval, fit_report,
-                   report_ci, report_fit)
+from lmfit import (Minimizer, Parameters, ci_report, compare_fit_results,
+                   conf_interval, fit_report, report_ci, report_compare_fit,
+                   report_fit)
 from lmfit.lineshapes import gaussian
 from lmfit.models import GaussianModel
 from lmfit.printfuncs import (alphanumeric_sort, correl_table,
@@ -408,3 +409,166 @@ def test_ci_report_with_ndigits(confidence_interval, ndigits):
     period_values = list(report_split[2].split()[2:])
     length = [len(val.split('.')[-1]) for val in period_values]
     assert np.all(np.equal(length, ndigits))
+
+
+@pytest.fixture
+def two_fit_results():
+    """Return two ModelResults for testing comparison functions."""
+    x = np.linspace(0, 12, 601)
+    data = gaussian(x, amplitude=36.4, center=6.70, sigma=0.88)
+    data = data + np.random.normal(scale=3.2, size=x.size)
+
+    model = GaussianModel()
+
+    params1 = model.make_params(amplitude=50, center=5, sigma=2)
+    params1['sigma'].min = 0
+    result1 = model.fit(data, params1, x=x, method='leastsq')
+
+    params2 = model.make_params(amplitude=35, center=7, sigma=1)
+    params2['sigma'].min = 0
+    result2 = model.fit(data, params2, x=x, method='least_squares')
+
+    return result1, result2
+
+
+def test_compare_fit_results_basic(two_fit_results):
+    """Verify that compare_fit_results generates a report."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2)
+
+    assert len(report) > 100
+    assert '[[Fit Results Comparison]]' in report
+    assert '[[Fit Statistics Comparison]]' in report
+    assert '[[Parameter Comparison]]' in report
+    assert '[[Model Comparison]]' in report
+    assert 'Result 1 vs Result 2' in report
+
+
+def test_compare_fit_results_with_titles(two_fit_results):
+    """Verify that custom titles work in compare_fit_results."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2,
+                                  title1='First Fit',
+                                  title2='Second Fit')
+
+    assert 'First Fit vs Second Fit' in report
+    assert 'First Fit' in report
+    assert 'Second Fit' in report
+
+
+def test_compare_fit_results_sort_pars(two_fit_results):
+    """Verify that sort_pars works in compare_fit_results."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2, sort_pars=True)
+    report_split = report.split('\n')
+
+    param_lines = [line for line in report_split if 'amplitude' in line or 'center' in line or 'sigma' in line]
+    assert len(param_lines) > 0
+
+
+def test_compare_fit_results_hide_statistics(two_fit_results):
+    """Verify that show_statistics=False hides statistics section."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2, show_statistics=False)
+
+    assert '[[Fit Statistics Comparison]]' not in report
+    assert '[[Parameter Comparison]]' in report
+
+
+def test_compare_fit_results_hide_parameters(two_fit_results):
+    """Verify that show_parameters=False hides parameters section."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2, show_parameters=False)
+
+    assert '[[Parameter Comparison]]' not in report
+    assert '[[Fit Statistics Comparison]]' in report
+
+
+def test_compare_fit_results_hide_model_comparison(two_fit_results):
+    """Verify that show_model_comparison=False hides model comparison."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2, show_model_comparison=False)
+
+    assert '[[Model Comparison]]' not in report
+    assert 'AIC Comparison' not in report
+    assert 'BIC Comparison' not in report
+    assert 'F-test' not in report
+
+
+def test_compare_fit_results_with_parameters_only():
+    """Verify that compare_fit_results works with only Parameters."""
+    params1 = Parameters()
+    params1.add_many(('amp', 10), ('cen', 5), ('wid', 1))
+
+    params2 = Parameters()
+    params2.add_many(('amp', 12), ('cen', 5.5), ('wid', 0.9))
+
+    report = compare_fit_results(params1, params2)
+
+    assert '[[Fit Results Comparison]]' in report
+    assert '[[Parameter Comparison]]' in report
+    assert 'amp' in report
+    assert 'cen' in report
+    assert 'wid' in report
+
+
+def test_compare_fit_results_aic_weights(two_fit_results):
+    """Verify that AIC comparison section is included."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2)
+
+    assert 'AIC Comparison' in report
+    assert 'BIC Comparison' in report
+    assert 'ΔAIC' in report
+    assert 'ΔBIC' in report
+    assert 'weight' in report
+
+
+def test_report_compare_fit(two_fit_results, capsys):
+    """Verify that report_compare_fit prints the comparison."""
+    result1, result2 = two_fit_results
+
+    report_compare_fit(result1, result2,
+                       title1='Test Fit 1',
+                       title2='Test Fit 2')
+
+    captured = capsys.readouterr()
+
+    assert '[[Fit Results Comparison]]' in captured.out
+    assert 'Test Fit 1 vs Test Fit 2' in captured.out
+
+
+def test_compare_fit_results_model_comparison_conclusions(two_fit_results):
+    """Verify that model comparison conclusions are included."""
+    result1, result2 = two_fit_results
+
+    report = compare_fit_results(result1, result2)
+
+    assert 'Conclusion:' in report
+    assert 'substantial support' in report or 'strongly preferred' in report or 'considerably less support' in report
+
+
+def test_compare_fit_results_with_fixed_parameter(two_fit_results):
+    """Verify that fixed parameters are handled correctly."""
+    result1, result2 = two_fit_results
+
+    result1.params['center'].vary = False
+    result2.params['center'].vary = False
+
+    report = compare_fit_results(result1, result2)
+
+    assert '(fixed)' in report or 'fixed' in report.lower()
+
+
+def test_compare_fit_results_import():
+    """Verify that compare_fit_results is exported from lmfit."""
+    import lmfit
+    assert hasattr(lmfit, 'compare_fit_results')
+    assert hasattr(lmfit, 'report_compare_fit')

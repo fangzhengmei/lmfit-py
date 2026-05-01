@@ -477,3 +477,459 @@ def ci_report(ci, with_offset=True, ndigits=5):
 def report_ci(ci):
     """Print a report for confidence intervals."""
     print(ci_report(ci))
+
+
+def compare_fit_results(result1, result2, sort_pars=False,
+                         show_statistics=True, show_parameters=True,
+                         show_model_comparison=True, min_correl=0.1,
+                         title1='Result 1', title2='Result 2'):
+    """Generate a report comparing two fitting results.
+
+    The report contains comparisons of fit statistics, parameter values
+    with uncertainties, and model comparison metrics.
+
+    Parameters
+    ----------
+    result1 : MinimizerResult, ModelResult, or Parameters
+        First fitting result to compare. Can be a MinimizerResult,
+        ModelResult, or Parameters object.
+    result2 : MinimizerResult, ModelResult, or Parameters
+        Second fitting result to compare. Can be a MinimizerResult,
+        ModelResult, or Parameters object.
+    sort_pars : bool or callable, optional
+        Whether to show parameter names sorted in alphanumerical order.
+        If False (default), then the parameters will be listed in the
+        order they were added to the Parameters dictionary. If callable,
+        then this (one argument) function is used to extract a comparison
+        key from each list element.
+    show_statistics : bool, optional
+        Whether to show fit statistics comparison (default is True).
+    show_parameters : bool, optional
+        Whether to show parameter comparison (default is True).
+    show_model_comparison : bool, optional
+        Whether to show model comparison metrics like AIC/BIC weights
+        (default is True).
+    min_correl : float, optional
+        Smallest correlation in absolute value to show when showing
+        correlations (default is 0.1). Note: correlation comparison is
+        not yet implemented.
+    title1 : str, optional
+        Title for the first result (default is 'Result 1').
+    title2 : str, optional
+        Title for the second result (default is 'Result 2').
+
+    Returns
+    -------
+    str
+        Multi-line text of fit comparison report.
+
+    Notes
+    -----
+    The comparison report includes:
+    - Fit statistics: chi-square, reduced chi-square, AIC, BIC, R-squared
+    - Parameter values: comparison of best-fit values and uncertainties
+    - Model comparison: AIC/BIC differences and weights, F-test for nested models
+
+    Examples
+    --------
+    >>> result1 = model1.fit(data1, params, x=x)
+    >>> result2 = model2.fit(data2, params, x=x)
+    >>> print(compare_fit_results(result1, result2,
+    ...                           title1='Model A', title2='Model B'))
+
+    """
+    from .parameter import Parameters
+
+    def get_result_data(result):
+        """Extract data from result object."""
+        data = {'params': None, 'stats': {}}
+
+        if isinstance(result, Parameters):
+            data['params'] = result
+        elif hasattr(result, 'params'):
+            data['params'] = result.params
+            stats = {
+                'method': getattr(result, 'method', None),
+                'nfev': getattr(result, 'nfev', None),
+                'ndata': getattr(result, 'ndata', None),
+                'nvarys': getattr(result, 'nvarys', None),
+                'chisqr': getattr(result, 'chisqr', None),
+                'redchi': getattr(result, 'redchi', None),
+                'aic': getattr(result, 'aic', None),
+                'bic': getattr(result, 'bic', None),
+                'rsquared': getattr(result, 'rsquared', None),
+                'success': getattr(result, 'success', None),
+                'errorbars': getattr(result, 'errorbars', None),
+            }
+            data['stats'] = {k: v for k, v in stats.items() if v is not None}
+
+        return data
+
+    data1 = get_result_data(result1)
+    data2 = get_result_data(result2)
+
+    params1 = data1['params']
+    params2 = data2['params']
+    stats1 = data1['stats']
+    stats2 = data2['stats']
+
+    if params1 is None or params2 is None:
+        raise ValueError("Both results must have Parameters to compare.")
+
+    buff = []
+    add = buff.append
+
+    add("=" * 70)
+    add("[[Fit Results Comparison]]")
+    add("=" * 70)
+    add(f"  {title1} vs {title2}")
+    add("")
+
+    if show_statistics and (stats1 or stats2):
+        add("-" * 70)
+        add("[[Fit Statistics Comparison]]")
+        add("-" * 70)
+        add("")
+
+        stat_labels = {
+            'method': 'fitting method',
+            'nfev': 'function evals',
+            'ndata': 'data points',
+            'nvarys': 'variables',
+            'chisqr': 'chi-square',
+            'redchi': 'reduced chi-square',
+            'aic': 'Akaike info crit',
+            'bic': 'Bayesian info crit',
+            'rsquared': 'R-squared',
+            'success': 'success',
+            'errorbars': 'error bars estimated',
+        }
+
+        all_stats = set(stats1.keys()) | set(stats2.keys())
+        display_order = ['method', 'nfev', 'ndata', 'nvarys', 'chisqr',
+                         'redchi', 'aic', 'bic', 'rsquared', 'success',
+                         'errorbars']
+
+        col1_width = max(len(title1), 15)
+        col2_width = max(len(title2), 15)
+        label_width = max(len(stat_labels.get(s, s)) for s in all_stats)
+
+        header = f"    {'Statistic':<{label_width}}  {title1:^{col1_width}}  {title2:^{col2_width}}  {'Difference':^{15}}"
+        add(header)
+        add("    " + "-" * (label_width + col1_width + col2_width + 19))
+
+        for stat in display_order:
+            if stat not in all_stats:
+                continue
+
+            label = stat_labels.get(stat, stat)
+            val1 = stats1.get(stat, 'N/A')
+            val2 = stats2.get(stat, 'N/A')
+
+            if isinstance(val1, float):
+                val1_str = gformat(val1)
+            elif val1 is None:
+                val1_str = 'N/A'
+            else:
+                val1_str = str(val1)
+
+            if isinstance(val2, float):
+                val2_str = gformat(val2)
+            elif val2 is None:
+                val2_str = 'N/A'
+            else:
+                val2_str = str(val2)
+
+            diff_str = ''
+            if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
+                diff = val2 - val1
+                if abs(diff) < 1e10 and abs(diff) > 1e-10:
+                    diff_str = f"{diff:+.4e}"
+                elif abs(diff) >= 1e10 or abs(diff) <= 1e-10:
+                    diff_str = f"{diff:+.4g}"
+                else:
+                    diff_str = f"{diff:+.6f}"
+
+            line = f"    {label:<{label_width}}  {val1_str:>{col1_width}}  {val2_str:>{col2_width}}  {diff_str:^{15}}"
+            add(line)
+
+        add("")
+
+    if show_parameters:
+        add("-" * 70)
+        add("[[Parameter Comparison]]")
+        add("-" * 70)
+        add("")
+
+        all_params = set(params1.keys()) | set(params2.keys())
+
+        if sort_pars:
+            if callable(sort_pars):
+                key = sort_pars
+            else:
+                key = alphanumeric_sort
+            parnames = sorted(all_params, key=key)
+        else:
+            parnames = list(params1.keys())
+            for p in params2.keys():
+                if p not in parnames:
+                    parnames.append(p)
+
+        if not parnames:
+            add("    No parameters found.")
+            add("")
+        else:
+            namelen = max(len(n) for n in parnames)
+
+            has_err1 = any(p.stderr is not None for p in params1.values()
+                          if hasattr(p, 'stderr'))
+            has_err2 = any(p.stderr is not None for p in params2.values()
+                          if hasattr(p, 'stderr'))
+            has_any_err = has_err1 or has_err2
+
+            header = f"    {'Parameter':<{namelen}}  "
+            if has_any_err:
+                header += f"{title1:^25}  {title2:^25}  {'Value Diff':^18}  {'Rel Diff':^12}"
+            else:
+                header += f"{title1:^12}  {title2:^12}  {'Value Diff':^18}  {'Rel Diff':^12}"
+            add(header)
+            add("    " + "-" * (namelen + 70 if has_any_err else namelen + 56))
+
+            for name in parnames:
+                par1 = params1.get(name, None)
+                par2 = params2.get(name, None)
+
+                val1 = getattr(par1, 'value', None)
+                val2 = getattr(par2, 'value', None)
+                err1 = getattr(par1, 'stderr', None)
+                err2 = getattr(par2, 'stderr', None)
+                vary1 = getattr(par1, 'vary', True) if par1 else None
+                vary2 = getattr(par2, 'vary', True) if par2 else None
+                expr1 = getattr(par1, 'expr', None) if par1 else None
+                expr2 = getattr(par2, 'expr', None) if par2 else None
+
+                val1_str = 'N/A'
+                val2_str = 'N/A'
+                err1_str = ''
+                err2_str = ''
+                diff_str = ''
+                rel_diff_str = ''
+
+                if val1 is not None:
+                    if isinstance(val1, (int, float)):
+                        val1_str = gformat(val1)
+                    else:
+                        val1_str = str(val1)
+
+                if val2 is not None:
+                    if isinstance(val2, (int, float)):
+                        val2_str = gformat(val2)
+                    else:
+                        val2_str = str(val2)
+
+                if err1 is not None:
+                    if isinstance(err1, (int, float)):
+                        err1_str = f" +/- {gformat(err1)}"
+
+                if err2 is not None:
+                    if isinstance(err2, (int, float)):
+                        err2_str = f" +/- {gformat(err2)}"
+
+                if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
+                    diff = val2 - val1
+                    if abs(diff) < 1e10 and abs(diff) > 1e-10:
+                        diff_str = f"{diff:+.4e}"
+                    elif abs(diff) >= 1e10 or abs(diff) <= 1e-10:
+                        diff_str = f"{diff:+.4g}"
+                    else:
+                        diff_str = f"{diff:+.6f}"
+
+                    if abs(val1) > 1e-15:
+                        rel_diff = (val2 - val1) / abs(val1)
+                        rel_diff_str = f"{rel_diff:+.2%}"
+                    else:
+                        rel_diff_str = 'N/A'
+
+                status1 = ''
+                status2 = ''
+                if par1:
+                    if expr1:
+                        status1 = " (expr)"
+                    elif not vary1:
+                        status1 = " (fixed)"
+                if par2:
+                    if expr2:
+                        status2 = " (expr)"
+                    elif not vary2:
+                        status2 = " (fixed)"
+
+                line = f"    {name:<{namelen}}  "
+                if has_any_err:
+                    line += f"{val1_str}{err1_str}{status1:>8s}  "
+                    line += f"{val2_str}{err2_str}{status2:>8s}  "
+                else:
+                    line += f"{val1_str:>12}  "
+                    line += f"{val2_str:>12}  "
+                line += f"{diff_str:^18}  {rel_diff_str:^12}"
+                add(line)
+
+            add("")
+
+    if show_model_comparison and stats1 and stats2:
+        add("-" * 70)
+        add("[[Model Comparison]]")
+        add("-" * 70)
+        add("")
+
+        aic1 = stats1.get('aic', None)
+        aic2 = stats2.get('aic', None)
+        bic1 = stats1.get('bic', None)
+        bic2 = stats2.get('bic', None)
+        chisqr1 = stats1.get('chisqr', None)
+        chisqr2 = stats2.get('chisqr', None)
+        nvarys1 = stats1.get('nvarys', None)
+        nvarys2 = stats2.get('nvarys', None)
+        ndata1 = stats1.get('ndata', None)
+        ndata2 = stats2.get('ndata', None)
+
+        if aic1 is not None and aic2 is not None:
+            add("  [AIC Comparison]")
+            aic_min = min(aic1, aic2)
+            delta_aic1 = aic1 - aic_min
+            delta_aic2 = aic2 - aic_min
+
+            rel_lik1 = np.exp(-0.5 * delta_aic1)
+            rel_lik2 = np.exp(-0.5 * delta_aic2)
+            aic_sum = rel_lik1 + rel_lik2
+            weight1 = rel_lik1 / aic_sum if aic_sum > 0 else 0
+            weight2 = rel_lik2 / aic_sum if aic_sum > 0 else 0
+
+            add(f"    {title1:15s}: AIC = {aic1:10.4f}, ΔAIC = {delta_aic1:10.4f}, weight = {weight1:.4f}")
+            add(f"    {title2:15s}: AIC = {aic2:10.4f}, ΔAIC = {delta_aic2:10.4f}, weight = {weight2:.4f}")
+            add("")
+
+            if delta_aic1 < 2 and delta_aic2 < 2:
+                add("    Conclusion: Both models have substantial support.")
+            elif delta_aic1 < 2:
+                add(f"    Conclusion: {title1} has substantial support.")
+            elif delta_aic2 < 2:
+                add(f"    Conclusion: {title2} has substantial support.")
+            elif delta_aic1 < 10:
+                add(f"    Conclusion: {title1} has considerably less support.")
+            elif delta_aic2 < 10:
+                add(f"    Conclusion: {title2} has considerably less support.")
+            else:
+                winner = title1 if aic1 < aic2 else title2
+                add(f"    Conclusion: {winner} is strongly preferred.")
+            add("")
+
+        if bic1 is not None and bic2 is not None:
+            add("  [BIC Comparison]")
+            bic_min = min(bic1, bic2)
+            delta_bic1 = bic1 - bic_min
+            delta_bic2 = bic2 - bic_min
+
+            rel_lik1_bic = np.exp(-0.5 * delta_bic1)
+            rel_lik2_bic = np.exp(-0.5 * delta_bic2)
+            bic_sum = rel_lik1_bic + rel_lik2_bic
+            weight1_bic = rel_lik1_bic / bic_sum if bic_sum > 0 else 0
+            weight2_bic = rel_lik2_bic / bic_sum if bic_sum > 0 else 0
+
+            add(f"    {title1:15s}: BIC = {bic1:10.4f}, ΔBIC = {delta_bic1:10.4f}, weight = {weight1_bic:.4f}")
+            add(f"    {title2:15s}: BIC = {bic2:10.4f}, ΔBIC = {delta_bic2:10.4f}, weight = {weight2_bic:.4f}")
+            add("")
+
+            if delta_bic1 < 2 and delta_bic2 < 2:
+                add("    Conclusion: Evidence against the model with higher BIC is not worth more than a bare mention.")
+            elif delta_bic1 < 6 and delta_bic2 < 6:
+                add("    Conclusion: Evidence against the model with higher BIC is positive.")
+            elif delta_bic1 < 10 and delta_bic2 < 10:
+                add("    Conclusion: Evidence against the model with higher BIC is strong.")
+            else:
+                winner = title1 if bic1 < bic2 else title2
+                add(f"    Conclusion: Evidence against the model with higher BIC is very strong ({winner} preferred).")
+            add("")
+
+        if (chisqr1 is not None and chisqr2 is not None and
+            nvarys1 is not None and nvarys2 is not None and
+            ndata1 is not None and ndata2 is not None and
+            ndata1 == ndata2):
+
+            add("  [F-test for Nested Models]")
+
+            df1 = ndata1 - nvarys1
+            df2 = ndata2 - nvarys2
+
+            if nvarys1 != nvarys2 and df1 > 0 and df2 > 0:
+                if nvarys2 > nvarys1:
+                    chisqr_reduced = chisqr1
+                    chisqr_full = chisqr2
+                    df_reduced = df1
+                    df_full = df2
+                    model_reduced = title1
+                    model_full = title2
+                else:
+                    chisqr_reduced = chisqr2
+                    chisqr_full = chisqr1
+                    df_reduced = df2
+                    df_full = df1
+                    model_reduced = title2
+                    model_full = title1
+
+                df_diff = df_reduced - df_full
+
+                if df_diff > 0 and df_full > 0:
+                    try:
+                        from scipy.stats import f, chi2
+
+                        f_stat = ((chisqr_reduced - chisqr_full) / df_diff) / (chisqr_full / df_full)
+                        p_value = 1 - f.cdf(f_stat, df_diff, df_full)
+
+                        lr_stat = chisqr_reduced - chisqr_full
+                        lr_pvalue = 1 - chi2.cdf(lr_stat, df_diff)
+
+                        add(f"    Comparing nested models:")
+                        add(f"      Reduced model ({model_reduced}): {nvarys1 if nvarys2 > nvarys1 else nvarys2} parameters")
+                        add(f"      Full model ({model_full}): {nvarys2 if nvarys2 > nvarys1 else nvarys1} parameters")
+                        add(f"      Difference: {df_diff} degrees of freedom")
+                        add("")
+                        add(f"      F-statistic: {f_stat:.4f}")
+                        add(f"      F-test p-value: {p_value:.4e}")
+                        add(f"      Likelihood ratio statistic: {lr_stat:.4f}")
+                        add(f"      Likelihood ratio p-value: {lr_pvalue:.4e}")
+                        add("")
+
+                        if p_value < 0.05:
+                            add(f"    Conclusion: Full model ({model_full}) is significantly better (p < 0.05).")
+                        else:
+                            add(f"    Conclusion: Reduced model ({model_reduced}) is preferred (not significantly worse).")
+                    except Exception:
+                        add("    Note: Could not perform F-test (scipy.stats required).")
+                else:
+                    add("    Note: F-test not applicable (models have same complexity or invalid df).")
+            else:
+                add("    Note: F-test requires models with different numbers of parameters fitted to the same data.")
+            add("")
+
+    add("=" * 70)
+    return '\n'.join(buff)
+
+
+def report_compare_fit(result1, result2, **kws):
+    """Print a report comparing two fitting results.
+
+    Parameters
+    ----------
+    result1 : MinimizerResult, ModelResult, or Parameters
+        First fitting result to compare.
+    result2 : MinimizerResult, ModelResult, or Parameters
+        Second fitting result to compare.
+    **kws : dict, optional
+        Additional keyword arguments passed to :func:`compare_fit_results`.
+
+    See Also
+    --------
+    compare_fit_results : Generate comparison report as string.
+
+    """
+    print(compare_fit_results(result1, result2, **kws))
