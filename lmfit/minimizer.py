@@ -488,6 +488,7 @@ class Minimizer:
         self.scale_covar = scale_covar
         self.max_nfev = max_nfev
         self.store_trace = store_trace
+        self._skip_trace = False
         self.nfev = 0
         self.nfree = 0
         self.ndata = 0
@@ -574,7 +575,7 @@ class Minimizer:
 
         out = self.userfcn(params, *self.userargs, **self.userkws)
 
-        if self.store_trace and hasattr(self.result, 'trace'):
+        if self.store_trace and hasattr(self.result, 'trace') and not self._skip_trace:
             param_values = {name: float(p.value) for name, p in params.items()}
             if isinstance(out, np.ndarray):
                 residual = out.copy()
@@ -1071,13 +1072,21 @@ class Minimizer:
                         setattr(result, attr, getattr(ret, attr))
 
             result.x = np.atleast_1d(result.x)
-            result.residual = self.__residual(result.x)
+            self._skip_trace = True
+            try:
+                result.residual = self.__residual(result.x)
+            finally:
+                self._skip_trace = False
             result.nfev -= 1
         else:
             result.x = result.last_internal_values
             self.result.nfev -= 2
             self._abort = False
-            result.residual = self.__residual(result.x)
+            self._skip_trace = True
+            try:
+                result.residual = self.__residual(result.x)
+            finally:
+                self._skip_trace = False
             result.nfev += 1
 
         result._calculate_statistics()
@@ -1152,7 +1161,7 @@ class Minimizer:
         out = userfcn(params, *userargs, **userkwargs)
         self.result.nfev += 1
 
-        if self.store_trace and hasattr(self.result, 'trace'):
+        if self.store_trace and hasattr(self.result, 'trace') and not self._skip_trace:
             param_values = {name: float(p.value) for name, p in params.items()}
             if isinstance(out, np.ndarray):
                 residual = out.copy()
@@ -1662,11 +1671,19 @@ class Minimizer:
         # do that here for consistency
         if not result.aborted:
             result.nfev -= 1
-            result.residual = self.__residual(ret.x, False)
+            self._skip_trace = True
+            try:
+                result.residual = self.__residual(ret.x, False)
+            finally:
+                self._skip_trace = False
         elif result.nfev > self.max_nfev-5:
             result.nfev -= 2
             _best = result.last_internal_values
-            result.residual = self.__residual(_best, False)
+            self._skip_trace = True
+            try:
+                result.residual = self.__residual(_best, False)
+            finally:
+                self._skip_trace = False
         result._calculate_statistics()
 
         if not result.aborted:
@@ -1775,11 +1792,21 @@ class Minimizer:
         if result.nfev >= self.max_nfev:
             result.nfev = self.max_nfev - 1
         self.result.nfev = result.nfev
+
+        if self.store_trace and hasattr(result, 'trace') and result.trace is not None:
+            if len(result.trace) >= 2:
+                result.trace = result.trace[2:]
+            for i, item in enumerate(result.trace):
+                item['iter'] = i + 1
+
+        self._skip_trace = True
         try:
             result.residual = self.__residual(_best)
             result._calculate_statistics()
         except AbortFitException:
             pass
+        finally:
+            self._skip_trace = False
 
         result.ier = ier
         result.lmdif_message = errmsg
@@ -1861,12 +1888,20 @@ class Minimizer:
 
         if not result.aborted:
             result.message = ret.message
-            result.residual = self.__residual(ret.x)
+            self._skip_trace = True
+            try:
+                result.residual = self.__residual(ret.x)
+            finally:
+                self._skip_trace = False
             result.nfev -= 1
         elif result.nfev > self.max_nfev-5:
             result.nfev -= 2
             _best = result.last_internal_values
-            result.residual = self.__residual(_best, False)
+            self._skip_trace = True
+            try:
+                result.residual = self.__residual(_best, False)
+            finally:
+                self._skip_trace = False
 
         result._calculate_statistics()
 
