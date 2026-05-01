@@ -12,6 +12,242 @@ except ImportError:
     HAS_NUMDIFFTOOLS = False
 
 
+class ReportFormatter:
+    """Unified formatter for all report outputs.
+
+    This class provides a centralized interface for formatting numbers,
+    percentages, missing values, and other elements used in fit reports,
+    parameter lists, and statistical outputs.
+    """
+
+    DEFAULT_FLOAT_LENGTH = 11
+    DEFAULT_CORRELATION_PRECISION = 4
+    DEFAULT_PERCENTAGE_PRECISION = 2
+    DEFAULT_INIT_VALUE_FORMAT = '.7g'
+
+    def __init__(self):
+        """Initialize the report formatter."""
+        pass
+
+    def format_float(self, val, length=DEFAULT_FLOAT_LENGTH):
+        """Format a number with '%g'-like format.
+
+        Except that:
+            a) the length of the output string will be of the requested length.
+            b) positive numbers will have a leading blank.
+            b) the precision will be as high as possible.
+            c) trailing zeros will not be trimmed.
+
+        The precision will typically be ``length-7``.
+
+        Parameters
+        ----------
+        val : float
+            Value to be formatted.
+        length : int, optional
+            Length of output string (default is 11).
+
+        Returns
+        -------
+        str
+            String of specified length.
+
+        Notes
+        -----
+        Positive values will have leading blank.
+
+        """
+        if val is None or isinstance(val, bool):
+            return f'{repr(val):>{length}s}'
+        try:
+            expon = int(log10(abs(val)))
+        except (OverflowError, ValueError):
+            expon = 0
+        except TypeError:
+            return f'{repr(val):>{length}s}'
+
+        length = max(length, 7)
+        form = 'e'
+        prec = length - 7
+        if abs(expon) > 99:
+            prec -= 1
+        elif ((expon > 0 and expon < (prec+4)) or
+              (expon <= 0 and -expon < (prec-1))):
+            form = 'f'
+            prec += 4
+            if expon > 0:
+                prec -= expon
+        return f'{val:{length}.{prec}{form}}'
+
+    def format_attribute(self, obj, attr, length=DEFAULT_FLOAT_LENGTH):
+        """Format an attribute of an object for printing.
+
+        Parameters
+        ----------
+        obj : object
+            The object to get the attribute from.
+        attr : str
+            The name of the attribute.
+        length : int, optional
+            Length for float formatting (default is 11).
+
+        Returns
+        -------
+        str
+            Formatted string representation of the attribute.
+        """
+        val = getattr(obj, attr, None)
+        if val is None:
+            return 'unknown'
+        if isinstance(val, int):
+            return f'{val}'
+        if isinstance(val, float):
+            return self.format_float(val, length=length).strip()
+        return repr(val)
+
+    def format_percentage(self, value, precision=DEFAULT_PERCENTAGE_PRECISION):
+        """Format a value as a percentage.
+
+        Parameters
+        ----------
+        value : float
+            The value to format as percentage (e.g., 0.5 becomes 50.00%).
+        precision : int, optional
+            Number of decimal places (default is 2).
+
+        Returns
+        -------
+        str
+            Formatted percentage string.
+        """
+        return f'({value:.{precision}%})'
+
+    def format_init_value(self, value):
+        """Format an initial value for display.
+
+        Parameters
+        ----------
+        value : float or None
+            The initial value to format.
+
+        Returns
+        -------
+        str
+            Formatted initial value string, or '(init = ?)' if None.
+        """
+        if value is None:
+            return '(init = ?)'
+        return f'(init = {value:{self.DEFAULT_INIT_VALUE_FORMAT}})'
+
+    def format_model_value(self, value):
+        """Format a model value for display.
+
+        Parameters
+        ----------
+        value : float
+            The model value to format.
+
+        Returns
+        -------
+        str
+            Formatted model value string.
+        """
+        return f'model_value = {value:{self.DEFAULT_INIT_VALUE_FORMAT}}'
+
+    def format_correlation(self, value, precision=DEFAULT_CORRELATION_PRECISION):
+        """Format a correlation coefficient.
+
+        Parameters
+        ----------
+        value : float
+            The correlation coefficient to format.
+        precision : int, optional
+            Number of decimal places (default is 4).
+
+        Returns
+        -------
+        str
+            Formatted correlation coefficient with sign.
+        """
+        return f'{value:+.{precision}f}'
+
+    def format_fixed_value(self, value):
+        """Format a fixed parameter value.
+
+        Parameters
+        ----------
+        value : float
+            The fixed parameter value to format.
+
+        Returns
+        -------
+        str
+            Formatted fixed value string with '(fixed)' suffix.
+        """
+        return f'{value: .7g} (fixed)'
+
+    def format_expression(self, expr):
+        """Format a parameter expression.
+
+        Parameters
+        ----------
+        expr : str
+            The expression to format.
+
+        Returns
+        -------
+        str
+            Formatted expression string with '==' prefix.
+        """
+        return f"== '{expr}'"
+
+    def format_ci_value(self, value, ndigits=5, is_offset=False):
+        """Format a confidence interval value.
+
+        Parameters
+        ----------
+        value : float
+            The confidence interval value to format.
+        ndigits : int, optional
+            Number of significant digits (default is 5).
+        is_offset : bool, optional
+            Whether the value is an offset from best value (default is False).
+            If True, the value will be formatted with a sign.
+
+        Returns
+        -------
+        str
+            Formatted confidence interval value.
+        """
+        if is_offset:
+            return f'{value:+.{ndigits}f}'
+        return f'{value:.{ndigits}f}'
+
+    def format_pretty_print(self, value, colwidth=8, precision=4, fmt='g'):
+        """Format a value for pretty_print output.
+
+        Parameters
+        ----------
+        value : float
+            The value to format.
+        colwidth : int, optional
+            Column width (default is 8).
+        precision : int, optional
+            Number of digits after floating point (default is 4).
+        fmt : {'g', 'e', 'f'}, optional
+            Numeric formatter (default is 'g').
+
+        Returns
+        -------
+        str
+            Formatted value string.
+        """
+        return f'{value:>{colwidth}.{precision}{fmt}}'
+
+
+_default_formatter = ReportFormatter()
+
+
 def alphanumeric_sort(s, _nsre=re.compile('([0-9]+)')):
     """Sort alphanumeric string."""
     return [int(text) if text.isdigit() else text.lower()
@@ -20,14 +256,7 @@ def alphanumeric_sort(s, _nsre=re.compile('([0-9]+)')):
 
 def getfloat_attr(obj, attr, length=11):
     """Format an attribute of an object for printing."""
-    val = getattr(obj, attr, None)
-    if val is None:
-        return 'unknown'
-    if isinstance(val, int):
-        return f'{val}'
-    if isinstance(val, float):
-        return gformat(val, length=length).strip()
-    return repr(val)
+    return _default_formatter.format_attribute(obj, attr, length=length)
 
 
 def gformat(val, length=11):
@@ -58,27 +287,7 @@ def gformat(val, length=11):
     Positive values will have leading blank.
 
     """
-    if val is None or isinstance(val, bool):
-        return f'{repr(val):>{length}s}'
-    try:
-        expon = int(log10(abs(val)))
-    except (OverflowError, ValueError):
-        expon = 0
-    except TypeError:
-        return f'{repr(val):>{length}s}'
-
-    length = max(length, 7)
-    form = 'e'
-    prec = length - 7
-    if abs(expon) > 99:
-        prec -= 1
-    elif ((expon > 0 and expon < (prec+4)) or
-          (expon <= 0 and -expon < (prec-1))):
-        form = 'f'
-        prec += 4
-        if expon > 0:
-            prec -= expon
-    return f'{val:{length}.{prec}{form}}'
+    return _default_formatter.format_float(val, length=length)
 
 
 def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
@@ -172,11 +381,9 @@ def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
         par = params[name]
         space = ' '*(namelen-len(name))
         nout = f"{name}:{space}"
-        inval = '(init = ?)'
-        if par.init_value is not None:
-            inval = f'(init = {par.init_value:.7g})'
+        inval = _default_formatter.format_init_value(par.init_value)
         if modelpars is not None and name in modelpars:
-            inval = f'{inval}, model_value = {modelpars[name].value:.7g}'
+            inval = f'{inval}, {_default_formatter.format_model_value(modelpars[name].value)}'
         try:
             sval = gformat(par.value)
         except (TypeError, ValueError):
@@ -184,7 +391,7 @@ def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
         if par.stderr is not None:
             serr = gformat(par.stderr)
             try:
-                spercent = f'({abs(float(par.stderr)/float(par.value)):.2%})'
+                spercent = _default_formatter.format_percentage(abs(float(par.stderr)/float(par.value)))
             except ZeroDivisionError:
                 spercent = ''
             sval = f'{sval} +/-{serr} {spercent}'
@@ -192,9 +399,9 @@ def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
         if par.vary:
             add(f"    {nout} {sval} {inval}")
         elif par.expr is not None:
-            add(f"    {nout} {sval} == '{par.expr}'")
+            add(f"    {nout} {sval} {_default_formatter.format_expression(par.expr)}")
         else:
-            add(f"    {nout} {par.value: .7g} (fixed)")
+            add(f"    {nout} {_default_formatter.format_fixed_value(par.value)}")
 
     if show_correl and correl_mode.startswith('tab'):
         add('[[Correlations]] ')
@@ -220,7 +427,7 @@ def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
             maxlen = max(len(k) for k in list(correls.keys()))
         for name, val in sort_correl:
             lspace = max(0, maxlen - len(name))
-            add(f"    C({name}){(' '*30)[:lspace]} = {val:+.4f}")
+            add(f"    C({name}){(' '*30)[:lspace]} = {_default_formatter.format_correlation(val)}")
     return '\n'.join(buff)
 
 
@@ -307,7 +514,7 @@ def fitreport_html_table(result, show_correl=True, min_correl=0.1):
             add(f'<caption>Correlations {extra}</caption>')
             stat_row('Parameter1', 'Parameter 2', 'Correlation', cat='th')
             for name1, name2, val in sort_correls:
-                stat_row(name1, name2, f"{val:+.4f}")
+                stat_row(name1, name2, _default_formatter.format_correlation(val))
             add('</table>')
     return ''.join(html)
 
@@ -321,7 +528,7 @@ def correl_table(params):
         return f" {a:{nwid}s}"
 
     def ffmt(a):
-        return sfmt(f"{a:+.4f}")
+        return sfmt(_default_formatter.format_correlation(a))
 
     title = ['', sfmt('Variable')]
     title.extend([sfmt(vname) for vname in varnames])
@@ -390,7 +597,7 @@ def params_html_table(params):
             if par.stderr is not None:
                 serr = gformat(par.stderr)
                 try:
-                    spercent = f'({abs(float(par.stderr)/float(par.value)):.2%})'
+                    spercent = _default_formatter.format_percentage(abs(float(par.stderr)/float(par.value)))
                 except ZeroDivisionError:
                     pass
             rows.extend([serr, spercent])
@@ -449,9 +656,6 @@ def ci_report(ci, with_offset=True, ndigits=5):
         return f"{x[0] * 100:.2f}%"
 
     title_shown = False
-    fmt_best = fmt_diff = "{0:.%if}" % ndigits
-    if with_offset:
-        fmt_diff = "{0:+.%if}" % ndigits
     for name, row in ci.items():
         if not title_shown:
             add("".join([''.rjust(maxlen+1)] + [i.rjust(ndigits+5)
@@ -465,9 +669,9 @@ def ci_report(ci, with_offset=True, ndigits=5):
                     offset = val
         for cval, val in row:
             if cval < 1.e-2:
-                sval = fmt_best.format(val)
+                sval = _default_formatter.format_ci_value(val, ndigits=ndigits, is_offset=False)
             else:
-                sval = fmt_diff.format(val-offset)
+                sval = _default_formatter.format_ci_value(val-offset, ndigits=ndigits, is_offset=with_offset)
             thisrow.append(sval.rjust(ndigits+5))
         add("".join(thisrow))
 
