@@ -488,6 +488,7 @@ class Minimizer:
         self.scale_covar = scale_covar
         self.max_nfev = max_nfev
         self.store_trace = store_trace
+        # Skip bookkeeping residual evaluations so trace mirrors user-facing nfev.
         self._skip_trace = False
         self.nfev = 0
         self.nfree = 0

@@ -141,6 +141,19 @@ class TestIterationTrace:
         assert 'chisqr' in first_entry
         assert isinstance(first_entry['chisqr'], (float, np.floating))
 
+    def test_trace_iter_sequence_matches_nfev_for_each_method(self):
+        """Regression test: iter numbering stays aligned with nfev."""
+        methods_to_test = ['leastsq', 'least_squares', 'nelder', 'lbfgsb']
+
+        for method in methods_to_test:
+            out = minimize(residual, pars, args=(x, y), method=method,
+                           store_trace=True)
+            trace = out.get_trace()
+            assert trace is not None
+            assert len(trace) == out.nfev
+            assert trace[-1]['iter'] == out.nfev
+            assert [item['iter'] for item in trace] == list(range(1, out.nfev + 1))
+
     def test_trace_get_trace_returns_copy(self):
         """Test that get_trace() returns a copy, not a reference."""
         out = mod.fit(y, pars, x=x, method='leastsq', store_trace=True)
