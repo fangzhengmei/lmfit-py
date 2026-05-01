@@ -670,6 +670,7 @@ class Minimizer:
         result.init_vals = []
         result._init_vals_internal = []
         result.params.update_constraints()
+        result.params.check_constraints()
         result.nfev = 0
         result.call_kws = {}
         result.errorbars = False

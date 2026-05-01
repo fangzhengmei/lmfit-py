@@ -11,6 +11,14 @@ import scipy.special
 from uncertainties import correlated_values, ufloat
 from uncertainties import wrap as uwrap
 
+from .exceptions import (
+    BoundsConflictError,
+    CircularDependencyError,
+    ConstraintViolations,
+    ExprResultOutOfBoundsError,
+    InitialValueOutOfBoundsError,
+    UndefinedVarInExprError,
+)
 from .jsonutils import decode4js, encode4js
 from .lineshapes import tiny
 from .printfuncs import params_html_table
@@ -286,6 +294,243 @@ class Parameters(dict):
 
         for name in requires_update:
             _update_param(name)
+
+    def _build_dependency_graph(self):
+        """Build a dependency graph for parameters with expressions.
+
+        Returns
+        -------
+        dict
+            A dictionary mapping parameter names to lists of parameter
+            names they depend on.
+        """
+        graph = {}
+        for name, par in self.items():
+            if par._expr is not None:
+                deps = []
+                for dep in par._expr_deps:
+                    if dep in self:
+                        deps.append(dep)
+                graph[name] = deps
+            else:
+                graph[name] = []
+        return graph
+
+    def _detect_circular_dependencies(self):
+        """Detect circular dependencies in parameter expressions.
+
+        Uses depth-first search to detect cycles in the dependency graph.
+
+        Returns
+        -------
+        list or None
+            A list of parameter names forming a cycle if found, None otherwise.
+            The list shows the cycle in order, e.g., ['a', 'b', 'a'] for
+            a cycle a -> b -> a.
+        """
+        graph = self._build_dependency_graph()
+        visited = set()
+        rec_stack = set()
+        path = []
+
+        def dfs(node):
+            if node not in visited:
+                visited.add(node)
+                rec_stack.add(node)
+                path.append(node)
+
+                for neighbor in graph.get(node, []):
+                    if neighbor not in visited:
+                        result = dfs(neighbor)
+                        if result is not None:
+                            return result
+                    elif neighbor in rec_stack:
+                        idx = path.index(neighbor)
+                        return path[idx:] + [neighbor]
+
+                path.pop()
+
+            if node in rec_stack:
+                rec_stack.remove(node)
+            return None
+
+        for node in graph:
+            if graph[node]:
+                result = dfs(node)
+                if result is not None:
+                    return result
+        return None
+
+    def _check_expr_undefined_vars(self):
+        """Check for undefined variables in parameter expressions.
+
+        Returns
+        -------
+        list
+            List of UndefinedVarInExprError exceptions for each undefined
+            variable found.
+        """
+        violations = []
+        for name, par in self.items():
+            if par._expr is not None:
+                for dep in par._expr_deps:
+                    if dep not in self:
+                        violations.append(UndefinedVarInExprError(
+                            name, par._expr, dep))
+        return violations
+
+    def _check_expr_out_of_bounds(self):
+        """Check if expression evaluation results are outside parameter bounds.
+
+        This method evaluates each expression parameter and checks if the
+        result is within the parameter's min/max bounds.
+
+        Returns
+        -------
+        list
+            List of ExprResultOutOfBoundsError exceptions for each expression
+            whose result is outside bounds.
+        """
+        violations = []
+
+        saved_values = {}
+        for name, par in self.items():
+            saved_values[name] = par._val
+
+        try:
+            params_copy = self.__class__()
+            params_copy._asteval = self._asteval
+
+            for name, par in self.items():
+                if par._expr is None:
+                    params_copy._asteval.symtable[name] = float(par._val)
+
+            for name, par in self.items():
+                if par._expr is not None:
+                    if par._expr_ast is None:
+                        par._expr_ast = par._expr_eval.parse(par._expr)
+
+                    try:
+                        result = par._expr_eval(par._expr_ast)
+                        if result is not None:
+                            min_val = par.min if par.min is not None else -inf
+                            max_val = par.max if par.max is not None else inf
+
+                            if min_val != -inf and result < min_val:
+                                violations.append(ExprResultOutOfBoundsError(
+                                    name, par._expr, result, min_val, max_val))
+                            elif max_val != inf and result > max_val:
+                                violations.append(ExprResultOutOfBoundsError(
+                                    name, par._expr, result, min_val, max_val))
+                    except Exception:
+                        pass
+        finally:
+            for name, val in saved_values.items():
+                if name in self:
+                    self[name]._val = val
+
+        return violations
+
+    def check_constraints(self, silent=False, raise_immediately=False):
+        """Check all parameters for constraint violations.
+
+        This method performs a comprehensive check of all parameters to detect
+        constraint violations before fitting. It checks for:
+
+        1. **Bounds conflicts**: Parameter ``min > max``
+        2. **Initial values outside bounds**: Parameter initial value is
+           outside its ``[min, max]`` range
+        3. **Expression results outside bounds**: Expression evaluates to a
+           value outside the parameter's bounds
+        4. **Circular dependencies**: Expressions that reference each other
+           in a cycle (e.g., ``a.expr = 'b'`` and ``b.expr = 'a'``)
+        5. **Undefined variables in expressions**: Expressions that reference
+           non-existent parameters
+
+        Parameters
+        ----------
+        silent : bool, optional
+            If True, return the list of violations without raising an exception.
+            If False (default), raise a ``ConstraintViolations`` exception if
+            any violations are found.
+        raise_immediately : bool, optional
+            If True, raise the first violation found immediately instead of
+            collecting all violations. Default is False.
+
+        Returns
+        -------
+        list
+            List of constraint violation exceptions, empty if no violations.
+
+        Raises
+        ------
+        ConstraintViolations
+            If any constraint violations are found and ``silent`` is False.
+            This exception contains a ``violations`` attribute with the list
+            of all violations found.
+
+        Examples
+        --------
+        >>> params = Parameters()
+        >>> params.add('a', value=10, min=0, max=5)  # value > max
+        >>> params.add('b', expr='a + c')  # 'c' is undefined
+        >>> violations = params.check_constraints(silent=True)
+        >>> len(violations)
+        2
+
+        See Also
+        --------
+        ConstraintViolations : Exception raised when violations are found
+        BoundsConflictError : Exception for min > max
+        InitialValueOutOfBoundsError : Exception for value outside bounds
+        ExprResultOutOfBoundsError : Exception for expr result outside bounds
+        CircularDependencyError : Exception for circular dependencies
+        UndefinedVarInExprError : Exception for undefined variables in expr
+
+        """
+        violations = []
+
+        for name, par in self.items():
+            init_val = getattr(par, 'init_value', par._val)
+            min_val = par.min if par.min is not None else -inf
+            max_val = par.max if par.max is not None else inf
+
+            if par._expr is None and init_val is not None:
+                if min_val != -inf and init_val < min_val:
+                    err = InitialValueOutOfBoundsError(name, init_val, min_val, max_val)
+                    if raise_immediately:
+                        raise err
+                    violations.append(err)
+                elif max_val != inf and init_val > max_val:
+                    err = InitialValueOutOfBoundsError(name, init_val, min_val, max_val)
+                    if raise_immediately:
+                        raise err
+                    violations.append(err)
+
+        undefined_vars = self._check_expr_undefined_vars()
+        for err in undefined_vars:
+            if raise_immediately:
+                raise err
+            violations.append(err)
+
+        cycle = self._detect_circular_dependencies()
+        if cycle is not None:
+            err = CircularDependencyError(cycle)
+            if raise_immediately:
+                raise err
+            violations.append(err)
+
+        if not undefined_vars and cycle is None:
+            expr_bounds = self._check_expr_out_of_bounds()
+            for err in expr_bounds:
+                if raise_immediately:
+                    raise err
+                violations.append(err)
+
+        if not silent and violations:
+            raise ConstraintViolations(violations)
+
+        return violations
 
     def pretty_repr(self, oneline=False):
         """Return a pretty representation of a Parameters class.
