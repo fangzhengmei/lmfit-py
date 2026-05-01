@@ -669,8 +669,8 @@ class Minimizer:
         result.var_names = []  # note that this *does* belong to self...
         result.init_vals = []
         result._init_vals_internal = []
-        result.params.update_constraints()
         result.params.check_constraints()
+        result.params.update_constraints()
         result.nfev = 0
         result.call_kws = {}
         result.errorbars = False
