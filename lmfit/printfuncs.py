@@ -244,6 +244,95 @@ class ReportFormatter:
         """
         return f'{value:>{colwidth}.{precision}{fmt}}'
 
+    def format_non_numeric(self):
+        """Format a non-numeric value indicator.
+
+        Returns
+        -------
+        str
+            String indicating non-numeric value.
+        """
+        return ' Non Numeric Value?'
+
+    def format_min_correl(self, value):
+        """Format the minimum correlation threshold for display.
+
+        Parameters
+        ----------
+        value : float
+            The minimum correlation threshold.
+
+        Returns
+        -------
+        str
+            Formatted threshold with 3 decimal places.
+        """
+        return f'{value:.3f}'
+
+    def format_boolean(self, value):
+        """Format a boolean value for display.
+
+        Parameters
+        ----------
+        value : bool
+            The boolean value to format.
+
+        Returns
+        -------
+        str
+            String representation of the boolean value.
+        """
+        return f'{value}'
+
+    def format_brute_step(self, value):
+        """Format a brute_step value for display.
+
+        Parameters
+        ----------
+        value : float or None
+            The brute_step value to format.
+
+        Returns
+        -------
+        str
+            Formatted brute_step value, or 'None' if None.
+        """
+        if value is None:
+            return 'None'
+        return self.format_float(value)
+
+    def format_ci_header_percent(self, value):
+        """Format a percentage value for CI report header.
+
+        This is different from format_percentage in that it does not
+        include parentheses and is used for confidence interval headers.
+
+        Parameters
+        ----------
+        value : float
+            The value to format as percentage (e.g., 0.95 becomes 95.00%).
+
+        Returns
+        -------
+        str
+            Formatted percentage string without parentheses.
+        """
+        return f"{value * 100:.2f}%"
+
+    def format_init_value_html(self, value):
+        """Format an initial value for HTML table display.
+
+        Parameters
+        ----------
+        value : float or None
+            The initial value to format.
+
+        Returns
+        -------
+        The raw value (for HTML table, no special formatting needed).
+        """
+        return value
+
 
 _default_formatter = ReportFormatter()
 
@@ -387,7 +476,7 @@ def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
         try:
             sval = gformat(par.value)
         except (TypeError, ValueError):
-            sval = ' Non Numeric Value?'
+            sval = _default_formatter.format_non_numeric()
         if par.stderr is not None:
             serr = gformat(par.stderr)
             try:
@@ -423,7 +512,7 @@ def fit_report(inpars, modelpars=None, show_correl=True, min_correl=0.1,
         sort_correl.reverse()
         if len(sort_correl) > 0:
             add('[[Correlations]] (unreported correlations are < '
-                f'{min_correl:.3f})')
+                f'{_default_formatter.format_min_correl(min_correl)})')
             maxlen = max(len(k) for k in list(correls.keys()))
         for name, val in sort_correl:
             lspace = max(0, maxlen - len(name))
@@ -509,7 +598,7 @@ def fitreport_html_table(result, show_correl=True, min_correl=0.1):
         if len(correls) > 0:
             sort_correls = sorted(correls, key=lambda val: abs(val[2]))
             sort_correls.reverse()
-            extra = f'(unreported values are < {min_correl:.3f})'
+            extra = f'(unreported values are < {_default_formatter.format_min_correl(min_correl)})'
             add('<table class="jp-toc-ignore">')
             add(f'<caption>Correlations {extra}</caption>')
             stat_row('Parameter1', 'Parameter 2', 'Correlation', cat='th')
@@ -602,17 +691,14 @@ def params_html_table(params):
                     pass
             rows.extend([serr, spercent])
         rows.extend((par.init_value, gformat(par.min),
-                     gformat(par.max), f'{par.vary}'))
+                     gformat(par.max), _default_formatter.format_boolean(par.vary)))
         if has_expr:
             expr = ''
             if par.expr is not None:
                 expr = par.expr
             rows.append(expr)
         if has_brute:
-            brute_step = 'None'
-            if par.brute_step is not None:
-                brute_step = gformat(par.brute_step)
-            rows.append(brute_step)
+            rows.append(_default_formatter.format_brute_step(par.brute_step))
 
         hrow = trow(rows, cat='td')
         add(f"<tr>{''.join(hrow)}</tr>")
@@ -653,7 +739,7 @@ def ci_report(ci, with_offset=True, ndigits=5):
         """Convert probabilities into header for CI report."""
         if abs(x[0]) < 1.e-2:
             return "_BEST_"
-        return f"{x[0] * 100:.2f}%"
+        return _default_formatter.format_ci_header_percent(x[0])
 
     title_shown = False
     for name, row in ci.items():
