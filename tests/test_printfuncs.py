@@ -572,3 +572,98 @@ def test_compare_fit_results_import():
     import lmfit
     assert hasattr(lmfit, 'compare_fit_results')
     assert hasattr(lmfit, 'report_compare_fit')
+
+
+def test_compare_fit_results_no_overlapping_params():
+    """Verify behavior when parameters have no overlap."""
+    params1 = Parameters()
+    params1.add_many(('amp', 10), ('cen', 5), ('wid', 1))
+
+    params2 = Parameters()
+    params2.add_many(('a', 1.0), ('b', 2.0), ('c', 3.0))
+
+    report = compare_fit_results(params1, params2,
+                                  title1='Model X',
+                                  title2='Model Y')
+
+    assert '[[Fit Results Comparison]]' in report
+    assert '[[Parameter Comparison]]' in report
+    assert 'amp' in report
+    assert 'cen' in report
+    assert 'wid' in report
+    assert 'a' in report
+    assert 'b' in report
+    assert 'c' in report
+    assert 'only in Model X' in report
+    assert 'only in Model Y' in report
+    assert 'N/A' in report
+
+
+def test_compare_fit_results_invalid_input_type():
+    """Verify that invalid input types raise appropriate errors."""
+    with pytest.raises(ValueError, match='Both results must have Parameters to compare'):
+        compare_fit_results([1, 2, 3], {'a': 1})
+
+    with pytest.raises(ValueError, match='Both results must have Parameters to compare'):
+        compare_fit_results('not a result', 'also not a result')
+
+    with pytest.raises(ValueError, match='Both results must have Parameters to compare'):
+        compare_fit_results(42, 3.14)
+
+    with pytest.raises(ValueError, match='Both results must have Parameters to compare'):
+        compare_fit_results(Parameters(), 'not a result')
+
+
+def test_compare_fit_results_correlation_comparison():
+    """Verify that correlation comparison section works correctly."""
+    x = np.linspace(0, 12, 601)
+    data = gaussian(x, amplitude=36.4, center=6.70, sigma=0.88)
+    data = data + np.random.normal(scale=3.2, size=x.size)
+
+    model = GaussianModel()
+
+    params1 = model.make_params(amplitude=50, center=5, sigma=2)
+    params1['sigma'].min = 0
+    result1 = model.fit(data, params1, x=x, method='leastsq')
+
+    params2 = model.make_params(amplitude=35, center=7, sigma=1)
+    params2['sigma'].min = 0
+    result2 = model.fit(data, params2, x=x, method='least_squares')
+
+    report = compare_fit_results(result1, result2, min_correl=0.1)
+
+    assert '[[Correlation Comparison]]' in report
+    assert 'unreported correlations are < 0.100' in report
+    assert 'Difference' in report
+
+    for name in result1.params:
+        par = result1.params[name]
+        if hasattr(par, 'correl') and par.correl:
+            for name2 in par.correl:
+                if abs(par.correl[name2]) > 0.1:
+                    key_str = f"{name}, {name2}" if name < name2 else f"{name2}, {name}"
+                    assert key_str in report
+                    break
+
+    report_high = compare_fit_results(result1, result2, min_correl=0.99)
+    assert '[[Correlation Comparison]]' not in report_high
+
+
+def test_compare_fit_results_partial_overlap():
+    """Verify behavior when parameters have partial overlap."""
+    params1 = Parameters()
+    params1.add_many(('a', 10), ('b', 5), ('c', 1))
+
+    params2 = Parameters()
+    params2.add_many(('b', 6), ('c', 2), ('d', 3))
+
+    report = compare_fit_results(params1, params2,
+                                  title1='Set 1',
+                                  title2='Set 2')
+
+    assert 'a' in report
+    assert 'b' in report
+    assert 'c' in report
+    assert 'd' in report
+    assert 'only in Set 1' in report
+    assert 'only in Set 2' in report

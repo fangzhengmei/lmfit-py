@@ -511,8 +511,7 @@ def compare_fit_results(result1, result2, sort_pars=False,
         (default is True).
     min_correl : float, optional
         Smallest correlation in absolute value to show when showing
-        correlations (default is 0.1). Note: correlation comparison is
-        not yet implemented.
+        correlations (default is 0.1).
     title1 : str, optional
         Title for the first result (default is 'Result 1').
     title2 : str, optional
@@ -528,6 +527,7 @@ def compare_fit_results(result1, result2, sort_pars=False,
     The comparison report includes:
     - Fit statistics: chi-square, reduced chi-square, AIC, BIC, R-squared
     - Parameter values: comparison of best-fit values and uncertainties
+    - Parameter correlations: comparison of correlation coefficients between parameters
     - Model comparison: AIC/BIC differences and weights, F-test for nested models
 
     Examples
@@ -662,6 +662,9 @@ def compare_fit_results(result1, result2, sort_pars=False,
         add("")
 
         all_params = set(params1.keys()) | set(params2.keys())
+        params_only_in_1 = set(params1.keys()) - set(params2.keys())
+        params_only_in_2 = set(params2.keys()) - set(params1.keys())
+        params_in_both = set(params1.keys()) & set(params2.keys())
 
         if sort_pars:
             if callable(sort_pars):
@@ -714,6 +717,13 @@ def compare_fit_results(result1, result2, sort_pars=False,
                 err2_str = ''
                 diff_str = ''
                 rel_diff_str = ''
+                status_suffix1 = ''
+                status_suffix2 = ''
+
+                if name in params_only_in_1:
+                    status_suffix1 = f" [only in {title1}]"
+                elif name in params_only_in_2:
+                    status_suffix2 = f" [only in {title2}]"
 
                 if val1 is not None:
                     if isinstance(val1, (int, float)):
@@ -765,12 +775,90 @@ def compare_fit_results(result1, result2, sort_pars=False,
 
                 line = f"    {name:<{namelen}}  "
                 if has_any_err:
-                    line += f"{val1_str}{err1_str}{status1:>8s}  "
-                    line += f"{val2_str}{err2_str}{status2:>8s}  "
+                    line += f"{val1_str}{err1_str}{status1:>8s}{status_suffix1:<20s}  "
+                    line += f"{val2_str}{err2_str}{status2:>8s}{status_suffix2:<20s}  "
                 else:
-                    line += f"{val1_str:>12}  "
-                    line += f"{val2_str:>12}  "
+                    line += f"{val1_str:>12}{status_suffix1:<12s}  "
+                    line += f"{val2_str:>12}{status_suffix2:<12s}  "
                 line += f"{diff_str:^18}  {rel_diff_str:^12}"
+                add(line)
+
+            add("")
+
+    def get_correlations(params, parnames, min_corr=0.1):
+        """Extract correlations from Parameters object."""
+        correlations = {}
+        for i, name in enumerate(parnames):
+            par = params.get(name, None)
+            if par is None:
+                continue
+            if not getattr(par, 'vary', True):
+                continue
+            if not hasattr(par, 'correl') or par.correl is None:
+                continue
+            for name2 in parnames[i+1:]:
+                if (name != name2 and name2 in par.correl and
+                        abs(par.correl[name2]) > min_corr):
+                    key = tuple(sorted([name, name2]))
+                    correlations[key] = par.correl[name2]
+        return correlations
+
+    common_params = set(params1.keys()) & set(params2.keys())
+    if common_params:
+        if sort_pars:
+            if callable(sort_pars):
+                key = sort_pars
+            else:
+                key = alphanumeric_sort
+            common_parnames = sorted(common_params, key=key)
+        else:
+            common_parnames = [p for p in params1.keys() if p in common_params]
+            for p in params2.keys():
+                if p in common_params and p not in common_parnames:
+                    common_parnames.append(p)
+
+        correls1 = get_correlations(params1, common_parnames, min_correl)
+        correls2 = get_correlations(params2, common_parnames, min_correl)
+
+        all_correl_keys = set(correls1.keys()) | set(correls2.keys())
+
+        if all_correl_keys:
+            add("-" * 70)
+            add("[[Correlation Comparison]]")
+            add("-" * 70)
+            add(f"    (unreported correlations are < {min_correl:.3f})")
+            add("")
+
+            max_keylen = max(len(f"{k[0]}, {k[1]}") for k in all_correl_keys)
+
+            header = f"    {'Correlation':<{max_keylen}}  {title1:^12}  {title2:^12}  {'Difference':^18}"
+            add(header)
+            add("    " + "-" * (max_keylen + 48))
+
+            sorted_keys = sorted(all_correl_keys,
+                                key=lambda k: abs(correls1.get(k, 0) + correls2.get(k, 0)) / 2,
+                                reverse=True)
+
+            for key in sorted_keys:
+                key_str = f"{key[0]}, {key[1]}"
+                corr1 = correls1.get(key, None)
+                corr2 = correls2.get(key, None)
+
+                corr1_str = 'N/A'
+                corr2_str = 'N/A'
+                diff_str = ''
+
+                if corr1 is not None:
+                    corr1_str = f"{corr1:+.4f}"
+
+                if corr2 is not None:
+                    corr2_str = f"{corr2:+.4f}"
+
+                if corr1 is not None and corr2 is not None:
+                    diff = corr2 - corr1
+                    diff_str = f"{diff:+.4f}"
+
+                line = f"    {key_str:<{max_keylen}}  {corr1_str:^12}  {corr2_str:^12}  {diff_str:^18}"
                 add(line)
 
             add("")
