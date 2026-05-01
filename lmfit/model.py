@@ -1033,7 +1033,7 @@ class Model:
     def fit(self, data, params=None, weights=None, method='leastsq',
             iter_cb=None, scale_covar=True, verbose=False, fit_kws=None,
             nan_policy=None, calc_covar=True, max_nfev=None,
-            coerce_farray=True, **kwargs):
+            coerce_farray=True, store_trace=False, **kwargs):
         """Fit the model to the data using the supplied Parameters.
 
         Parameters
@@ -1072,6 +1072,12 @@ class Model:
             with dtype of float64 (or complex128).  If set to False, data
             and independent data are not coerced at all, but the output of
             the model function will be. (default is True)
+        store_trace : bool, optional
+            Whether to store the iteration trace during fitting (default is
+            False). If True, the parameter values and residuals at each
+            function evaluation will be stored in the result object's
+            ``trace`` attribute, and can be accessed via the ``get_trace()``
+            method.
         **kwargs : optional
             Arguments to pass to the model function, possibly overriding
             parameters.
@@ -1177,7 +1183,7 @@ class Model:
         output = ModelResult(self, params, method=method, iter_cb=iter_cb,
                              scale_covar=scale_covar, fcn_kws=kwargs,
                              nan_policy=self.nan_policy, calc_covar=calc_covar,
-                             max_nfev=max_nfev, **fit_kws)
+                             max_nfev=max_nfev, store_trace=store_trace, **fit_kws)
         output.fit(data=data, weights=weights)
         output.components = self.components
         return output
@@ -1488,7 +1494,7 @@ class ModelResult(Minimizer):
     def __init__(self, model, params, data=None, weights=None,
                  method='leastsq', fcn_args=None, fcn_kws=None,
                  iter_cb=None, scale_covar=True, nan_policy='raise',
-                 calc_covar=True, max_nfev=None, **fit_kws):
+                 calc_covar=True, max_nfev=None, store_trace=False, **fit_kws):
         """
         Parameters
         ----------
@@ -1519,6 +1525,12 @@ class ModelResult(Minimizer):
         max_nfev : int or None, optional
             Maximum number of function evaluations (default is None). The
             default value depends on the fitting method.
+        store_trace : bool, optional
+            Whether to store the iteration trace during fitting (default is
+            False). If True, the parameter values and residuals at each
+            function evaluation will be stored in the result object's
+            ``trace`` attribute, and can be accessed via the ``get_trace()``
+            method.
         **fit_kws : optional
             Keyword arguments to send to minimization routine.
 
@@ -1534,7 +1546,8 @@ class ModelResult(Minimizer):
                            fcn_args=fcn_args, fcn_kws=fcn_kws,
                            iter_cb=iter_cb, nan_policy=nan_policy,
                            scale_covar=scale_covar, calc_covar=calc_covar,
-                           max_nfev=max_nfev, **fit_kws)
+                           max_nfev=max_nfev, store_trace=store_trace,
+                           **fit_kws)
 
     def fit(self, data=None, params=None, weights=None, method=None,
             nan_policy=None, **kwargs):

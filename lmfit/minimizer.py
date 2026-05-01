@@ -242,12 +242,19 @@ class MinimizerResult:
     bic : float
         Bayesian Information Criterion statistic:
         :math:`N \ln(\chi^2/N) + \ln(N) N_{\rm varys}`.
+    trace : list of dict or None
+        Iteration trace recorded during fitting. Each dictionary contains
+        'iter' (iteration number), 'params' (parameter values dict), and
+        'residual' (residual array or scalar). Only available if
+        ``store_trace=True`` was passed to Minimizer.
 
     Methods
     -------
     show_candidates
         :meth:`pretty_print` representation of candidates from the `brute`
         fitting method.
+    get_trace
+        Return the iteration trace as a list of dictionaries.
 
     """
 
@@ -270,6 +277,39 @@ class MinimizerResult:
         elif len(self.chain.shape) == 3:
             return pd.DataFrame(self.chain.reshape((-1, self.nvarys)),
                                 columns=self.var_names)
+
+    def get_trace(self):
+        """Return the iteration trace as a list of dictionaries.
+
+        Each dictionary in the list contains:
+            - 'iter': iteration number (starting from 1)
+            - 'params': dictionary of parameter values at this iteration
+            - 'residual': residual array or scalar at this iteration
+            - 'chisqr': chi-square value at this iteration (if residual is array)
+
+        Returns
+        -------
+        list of dict or None
+            The iteration trace, or None if ``store_trace=True`` was not used.
+
+        """
+        if not hasattr(self, 'trace') or self.trace is None:
+            return None
+
+        result = []
+        for item in self.trace:
+            entry = {
+                'iter': item['iter'],
+                'params': deepcopy(item['params']),
+            }
+            if isinstance(item['residual'], np.ndarray):
+                entry['residual'] = item['residual'].copy()
+                entry['chisqr'] = (item['residual']**2).sum()
+            else:
+                entry['residual'] = item['residual']
+                entry['chisqr'] = item['residual']
+            result.append(entry)
+        return result
 
     def show_candidates(self, candidate_nmb='all'):
         """Show pretty_print() representation of candidates.
@@ -334,7 +374,8 @@ class Minimizer:
 
     def __init__(self, userfcn, params, fcn_args=None, fcn_kws=None,
                  iter_cb=None, scale_covar=True, nan_policy='raise',
-                 reduce_fcn=None, calc_covar=True, max_nfev=None, **kws):
+                 reduce_fcn=None, calc_covar=True, max_nfev=None,
+                 store_trace=False, **kws):
         """
         Parameters
         ----------
@@ -398,6 +439,12 @@ class Minimizer:
         max_nfev : int or None, optional
             Maximum number of function evaluations (default is None). The
             default value depends on the fitting method.
+        store_trace : bool, optional
+            Whether to store the iteration trace during fitting (default is
+            False). If True, the parameter values and residuals at each
+            function evaluation will be stored in the result object's
+            ``trace`` attribute, and can be accessed via the ``get_trace()``
+            method.
         **kws : dict, optional
             Options to pass to the minimizer being used.
 
@@ -440,6 +487,7 @@ class Minimizer:
         self.calc_covar = calc_covar
         self.scale_covar = scale_covar
         self.max_nfev = max_nfev
+        self.store_trace = store_trace
         self.nfev = 0
         self.nfree = 0
         self.ndata = 0
@@ -525,6 +573,18 @@ class Minimizer:
             raise AbortFitException(f"fit aborted: too many function evaluations {self.max_nfev}")
 
         out = self.userfcn(params, *self.userargs, **self.userkws)
+
+        if self.store_trace and hasattr(self.result, 'trace'):
+            param_values = {name: float(p.value) for name, p in params.items()}
+            if isinstance(out, np.ndarray):
+                residual = out.copy()
+            else:
+                residual = out
+            self.result.trace.append({
+                'iter': len(self.result.trace) + 1,
+                'params': param_values,
+                'residual': residual
+            })
 
         if callable(self.iter_cb):
             abort = self.iter_cb(params, self.result.nfev, out,
@@ -676,6 +736,9 @@ class Minimizer:
         result.aborted = False
         result.success = True
         result.covar = None
+
+        if self.store_trace:
+            result.trace = []
 
         for name, par in self.result.params.items():
             par.stderr = None
@@ -1088,6 +1151,19 @@ class Minimizer:
         # now calculate the log-likelihood
         out = userfcn(params, *userargs, **userkwargs)
         self.result.nfev += 1
+
+        if self.store_trace and hasattr(self.result, 'trace'):
+            param_values = {name: float(p.value) for name, p in params.items()}
+            if isinstance(out, np.ndarray):
+                residual = out.copy()
+            else:
+                residual = out
+            self.result.trace.append({
+                'iter': len(self.result.trace) + 1,
+                'params': param_values,
+                'residual': residual
+            })
+
         if callable(self.iter_cb):
             abort = self.iter_cb(params, self.result.nfev, out,
                                  *userargs, **userkwargs)
@@ -2563,7 +2639,7 @@ def coerce_float64(arr, nan_policy='raise', handle_inf=True,
 
 def minimize(fcn, params, method='leastsq', args=None, kws=None, iter_cb=None,
              scale_covar=True, nan_policy='raise', reduce_fcn=None,
-             calc_covar=True, max_nfev=None, **fit_kws):
+             calc_covar=True, max_nfev=None, store_trace=False, **fit_kws):
     """Perform the minimization of the objective function.
 
     The minimize function takes an objective function to be minimized,
@@ -2657,6 +2733,12 @@ def minimize(fcn, params, method='leastsq', args=None, kws=None, iter_cb=None,
     max_nfev : int or None, optional
         Maximum number of function evaluations (default is None). The
         default value depends on the fitting method.
+    store_trace : bool, optional
+        Whether to store the iteration trace during fitting (default is
+        False). If True, the parameter values and residuals at each
+        function evaluation will be stored in the result object's
+        ``trace`` attribute, and can be accessed via the ``get_trace()``
+        method.
     **fit_kws : dict, optional
         Options to pass to the minimizer being used.
 
@@ -2705,5 +2787,6 @@ def minimize(fcn, params, method='leastsq', args=None, kws=None, iter_cb=None,
     fitter = Minimizer(fcn, params, fcn_args=args, fcn_kws=kws,
                        iter_cb=iter_cb, scale_covar=scale_covar,
                        nan_policy=nan_policy, reduce_fcn=reduce_fcn,
-                       calc_covar=calc_covar, max_nfev=max_nfev, **fit_kws)
+                       calc_covar=calc_covar, max_nfev=max_nfev,
+                       store_trace=store_trace, **fit_kws)
     return fitter.minimize(method=method)
