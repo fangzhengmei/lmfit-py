@@ -528,8 +528,11 @@ def scan_report(
     add(f"    Scanned parameters: {list(scanner.scan_ranges.keys())}")
 
     for param_name, values in scanner.scan_ranges.items():
-        add(f"    {param_name}: {values[0]:.6g} to {values[-1]:.6g} "
-            f"({len(values)} points)")
+        if len(values) > 0:
+            add(f"    {param_name}: {values[0]:.6g} to {values[-1]:.6g} "
+                f"({len(values)} points)")
+        else:
+            add(f"    {param_name}: (empty range - {len(values)} points)")
     add("")
 
     successful = sum(1 for r in scanner.scan_results if r.success)
@@ -698,8 +701,12 @@ def scan_report_html_table(
     _stat_row('Scanned parameters', ', '.join(scanner.scan_ranges.keys()))
 
     for param_name, values in scanner.scan_ranges.items():
-        _stat_row(f'{param_name} range',
-                  f'{values[0]:.6g} to {values[-1]:.6g} ({len(values)} points)')
+        if len(values) > 0:
+            _stat_row(f'{param_name} range',
+                      f'{values[0]:.6g} to {values[-1]:.6g} ({len(values)} points)')
+        else:
+            _stat_row(f'{param_name} range',
+                      f'(empty range - {len(values)} points)')
     add('</table>')
 
     successful = sum(1 for r in scanner.scan_results if r.success)

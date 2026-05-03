@@ -110,23 +110,56 @@ class ParameterScan:
             End of the range (ignored if 'values' is provided).
         num : int, optional
             Number of points in the range (must provide either 'num' or 'step').
+            Must be a positive integer.
         step : float, optional
             Step size between points (must provide either 'num' or 'step').
+            Must be a non-zero value.
         values : list or np.ndarray, optional
             Explicit list of values to use (overrides start/end/num/step).
+            Must not be empty.
 
         Raises
         ------
         ValueError
             If neither 'num' nor 'step' is provided when using start/end,
-            or if no valid range specification is provided.
+            or if no valid range specification is provided,
+            or if 'values' is empty,
+            or if 'num' is not a positive integer,
+            or if the generated range is empty.
         """
         if values is not None:
-            self.scan_ranges[param_name] = np.asarray(values)
+            values_arr = np.asarray(values)
+            if values_arr.size == 0:
+                raise ValueError(
+                    f"Scan range for parameter '{param_name}' cannot be empty. "
+                    "Please provide at least one value to scan."
+                )
+            self.scan_ranges[param_name] = values_arr
         elif num is not None:
-            self.scan_ranges[param_name] = np.linspace(start, end, num)
+            if num <= 0:
+                raise ValueError(
+                    f"Parameter 'num' must be a positive integer, got {num}. "
+                    f"Cannot create scan range for parameter '{param_name}'."
+                )
+            range_arr = np.linspace(start, end, num)
+            if range_arr.size == 0:
+                raise ValueError(
+                    f"Generated scan range for parameter '{param_name}' is empty. "
+                    "Please check your start, end, and num values."
+                )
+            self.scan_ranges[param_name] = range_arr
         elif step is not None:
-            self.scan_ranges[param_name] = np.arange(start, end + step, step)
+            if step == 0:
+                raise ValueError(
+                    f"Parameter 'step' cannot be zero for parameter '{param_name}'."
+                )
+            range_arr = np.arange(start, end + step, step)
+            if range_arr.size == 0:
+                raise ValueError(
+                    f"Generated scan range for parameter '{param_name}' is empty. "
+                    "Please check your start, end, and step values."
+                )
+            self.scan_ranges[param_name] = range_arr
         else:
             raise ValueError(
                 "Must provide either 'values', 'num', or 'step' to define the scan range."

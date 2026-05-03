@@ -115,6 +115,51 @@ class TestAddScanRange:
         with pytest.raises(ValueError, match="Must provide either 'values', 'num', or 'step'"):
             scanner.add_scan_range('center', start=4.0, end=6.0)
 
+    def test_add_scan_range_with_empty_values(self, gaussian_data):
+        """Test that add_scan_range fails with empty values list."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y)
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            scanner.add_scan_range('center', start=0, end=1, values=[])
+
+    def test_add_scan_range_with_empty_numpy_array(self, gaussian_data):
+        """Test that add_scan_range fails with empty numpy array."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y)
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            scanner.add_scan_range('center', start=0, end=1, values=np.array([]))
+
+    def test_add_scan_range_with_zero_num(self, gaussian_data):
+        """Test that add_scan_range fails with num=0."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y)
+
+        with pytest.raises(ValueError, match="must be a positive integer"):
+            scanner.add_scan_range('center', start=4.0, end=6.0, num=0)
+
+    def test_add_scan_range_with_negative_num(self, gaussian_data):
+        """Test that add_scan_range fails with negative num."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y)
+
+        with pytest.raises(ValueError, match="must be a positive integer"):
+            scanner.add_scan_range('center', start=4.0, end=6.0, num=-5)
+
+    def test_add_scan_range_with_zero_step(self, gaussian_data):
+        """Test that add_scan_range fails with step=0."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y)
+
+        with pytest.raises(ValueError, match="cannot be zero"):
+            scanner.add_scan_range('center', start=4.0, end=6.0, step=0.0)
+
 
 class TestParameterScanRun:
     """Tests for the run method."""
@@ -327,3 +372,68 @@ class TestCompositeModelScan:
 
         assert len(results) == 3
         assert all(r.success for r in results)
+
+
+class TestEdgeCases:
+    """Tests for edge cases and boundary conditions."""
+
+    def test_scan_report_defensive_code_empty_range(self, gaussian_data):
+        """Test that scan_report handles empty ranges gracefully (defensive code)."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y, fit_kws={'x': x})
+
+        scanner.scan_ranges['center'] = np.array([])
+
+        report = scan_report(scanner)
+        assert isinstance(report, str)
+        assert 'empty range' in report
+
+    def test_scan_report_html_defensive_code_empty_range(self, gaussian_data):
+        """Test that scan_report_html_table handles empty ranges gracefully."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y, fit_kws={'x': x})
+
+        scanner.scan_ranges['center'] = np.array([])
+
+        html_report = scan_report_html_table(scanner)
+        assert isinstance(html_report, str)
+        assert 'empty range' in html_report
+
+    def test_scan_parameters_with_empty_range_raises(self, gaussian_data):
+        """Test that scan_parameters raises error with empty range."""
+        x, y = gaussian_data
+        model = GaussianModel()
+
+        with pytest.raises(ValueError, match="cannot be empty"):
+            scan_parameters(
+                model_or_minimizer=model,
+                scan_ranges={'center': []},
+                data=y,
+                fit_kws={'x': x}
+            )
+
+    def test_single_value_range(self, gaussian_data):
+        """Test that a single value range works correctly."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y, fit_kws={'x': x})
+
+        scanner.add_scan_range('center', start=5.0, end=5.0, num=1)
+        assert len(scanner.scan_ranges['center']) == 1
+
+        results = scanner.run(verbose=False)
+        assert len(results) == 1
+
+    def test_single_value_with_values(self, gaussian_data):
+        """Test that a single value in values list works correctly."""
+        x, y = gaussian_data
+        model = GaussianModel()
+        scanner = ParameterScan(model=model, data=y, fit_kws={'x': x})
+
+        scanner.add_scan_range('center', start=0, end=1, values=[5.0])
+        assert len(scanner.scan_ranges['center']) == 1
+
+        results = scanner.run(verbose=False)
+        assert len(results) == 1
