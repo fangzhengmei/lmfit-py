@@ -477,3 +477,314 @@ def ci_report(ci, with_offset=True, ndigits=5):
 def report_ci(ci):
     """Print a report for confidence intervals."""
     print(ci_report(ci))
+
+
+def scan_report(
+    scanner,
+    show_best: bool = True,
+    show_summary: bool = True,
+    show_all: bool = False,
+    sort_by: str = 'chisqr',
+    max_rows: int = 10
+):
+    """Generate a text report of parameter scan results.
+
+    Parameters
+    ----------
+    scanner : ParameterScan
+        The ParameterScan object containing scan results.
+    show_best : bool, optional
+        Whether to show the best fit result (default is True).
+    show_summary : bool, optional
+        Whether to show a summary of scan statistics (default is True).
+    show_all : bool, optional
+        Whether to show all scan points (default is False).
+    sort_by : str, optional
+        Metric to sort results by. Options are:
+        'chisqr', 'redchi', 'aic', 'bic', 'param' (default is 'chisqr').
+    max_rows : int, optional
+        Maximum number of rows to show when show_all is False (default is 10).
+
+    Returns
+    -------
+    str
+        Multi-line text of the scan report.
+    """
+    from .scanner import ParameterScan, ScanResult
+
+    if not isinstance(scanner, ParameterScan):
+        raise TypeError("First argument must be a ParameterScan object.")
+
+    buff = []
+    add = buff.append
+
+    add("=" * 70)
+    add("[[Parameter Scan Report]]")
+    add("=" * 70)
+    add("")
+
+    add("[[Scan Configuration]]")
+    add(f"    Number of scan points: {len(scanner.scan_results)}")
+    add(f"    Scanned parameters: {list(scanner.scan_ranges.keys())}")
+
+    for param_name, values in scanner.scan_ranges.items():
+        add(f"    {param_name}: {values[0]:.6g} to {values[-1]:.6g} "
+            f"({len(values)} points)")
+    add("")
+
+    successful = sum(1 for r in scanner.scan_results if r.success)
+    failed = len(scanner.scan_results) - successful
+
+    add("[[Scan Statistics]]")
+    add(f"    Total points:      {len(scanner.scan_results)}")
+    add(f"    Successful fits:   {successful}")
+    add(f"    Failed fits:       {failed}")
+    add("")
+
+    if show_summary and scanner.scan_results:
+        successful_results = [r for r in scanner.scan_results if r.success]
+
+        if successful_results:
+            metrics = ['chisqr', 'redchi', 'aic', 'bic']
+            add("[[Metric Summary]]")
+
+            for metric in metrics:
+                values = [getattr(r, metric) for r in successful_results
+                          if getattr(r, metric) is not None]
+                if values:
+                    add(f"    {metric.upper()}:")
+                    add(f"        Min:  {gformat(min(values))}")
+                    add(f"        Max:  {gformat(max(values))}")
+                    add(f"        Mean: {gformat(np.mean(values))}")
+                    add(f"        Std:  {gformat(np.std(values))}")
+            add("")
+
+    if show_best and scanner.scan_results:
+        best = scanner.get_best_result(metric=sort_by if sort_by != 'param' else 'chisqr')
+        if best:
+            add("[[Best Fit Result]]")
+            add("-" * 70)
+            add("    Parameter values:")
+            for name, value in best.param_values.items():
+                add(f"        {name}: {value:.6g}")
+            add("")
+            add("    Fit metrics:")
+            if best.chisqr is not None:
+                add(f"        chi-square         = {gformat(best.chisqr)}")
+            if best.redchi is not None:
+                add(f"        reduced chi-square = {gformat(best.redchi)}")
+            if best.aic is not None:
+                add(f"        Akaike info crit   = {gformat(best.aic)}")
+            if best.bic is not None:
+                add(f"        Bayesian info crit = {gformat(best.bic)}")
+            add("")
+
+            if best.params:
+                add("    Optimized parameters:")
+                for name, par in best.params.items():
+                    if par.vary:
+                        err_str = ""
+                        if par.stderr is not None:
+                            err_str = f" +/- {gformat(par.stderr)}"
+                        add(f"        {name}: {gformat(par.value)}{err_str}")
+            add("")
+
+    if show_all or max_rows > 0:
+        add("[[Scan Results]]")
+        add("-" * 70)
+
+        param_names = list(scanner.scan_ranges.keys())
+
+        header_parts = ["#"]
+        for name in param_names:
+            header_parts.append(f"{name:>12s}")
+        header_parts.extend(["chisqr", "redchi", "  aic", "  bic", "success"])
+        header = "  ".join(header_parts)
+        add(header)
+        add("-" * len(header))
+
+        results_to_show = scanner.scan_results
+
+        if sort_by == 'param':
+            def sort_key(r):
+                return tuple(r.param_values.get(p, 0) for p in param_names)
+            results_to_show = sorted(results_to_show, key=sort_key)
+        elif sort_by in ['chisqr', 'redchi', 'aic', 'bic']:
+            def sort_key(r):
+                val = getattr(r, sort_by)
+                return float('inf') if val is None else val
+            results_to_show = sorted(results_to_show, key=sort_key)
+
+        if not show_all:
+            results_to_show = results_to_show[:max_rows]
+
+        for i, result in enumerate(results_to_show, 1):
+            row_parts = [f"{i:3d}"]
+
+            for name in param_names:
+                val = result.param_values.get(name, np.nan)
+                row_parts.append(f"{val:>12.6g}")
+
+            chisqr = result.chisqr if result.chisqr is not None else float('nan')
+            redchi = result.redchi if result.redchi is not None else float('nan')
+            aic = result.aic if result.aic is not None else float('nan')
+            bic = result.bic if result.bic is not None else float('nan')
+
+            row_parts.append(f"{chisqr:>10.4g}")
+            row_parts.append(f"{redchi:>10.4g}")
+            row_parts.append(f"{aic:>8.4g}")
+            row_parts.append(f"{bic:>8.4g}")
+            row_parts.append(f"{str(result.success):>7s}")
+
+            add("  ".join(row_parts))
+
+        if not show_all and len(scanner.scan_results) > max_rows:
+            add(f"\n    ... and {len(scanner.scan_results) - max_rows} more results "
+                "(set show_all=True to see all)")
+
+    add("")
+    add("=" * 70)
+    return '\n'.join(buff)
+
+
+def scan_report_html_table(
+    scanner,
+    show_best: bool = True,
+    show_summary: bool = True,
+    sort_by: str = 'chisqr',
+    max_rows: int = 20
+):
+    """Generate an HTML report of parameter scan results.
+
+    Parameters
+    ----------
+    scanner : ParameterScan
+        The ParameterScan object containing scan results.
+    show_best : bool, optional
+        Whether to show the best fit result (default is True).
+    show_summary : bool, optional
+        Whether to show a summary of scan statistics (default is True).
+    sort_by : str, optional
+        Metric to sort results by (default is 'chisqr').
+    max_rows : int, optional
+        Maximum number of rows to show (default is 20).
+
+    Returns
+    -------
+    str
+        HTML code of the scan report.
+    """
+    from .scanner import ParameterScan
+
+    if not isinstance(scanner, ParameterScan):
+        raise TypeError("First argument must be a ParameterScan object.")
+
+    html = []
+    add = html.append
+
+    def _stat_row(label, val, val2=None, cat='td'):
+        if val2 is None:
+            rows = trow([label, val], cat=cat)
+        else:
+            rows = trow([label, val, val2], cat=cat)
+        add(f"<tr>{''.join(rows)}</tr>")
+
+    add('<div class="jp-toc-ignore">')
+    add('<h3>Parameter Scan Report</h3>')
+
+    add('<table class="jp-toc-ignore">')
+    add('<caption>Scan Configuration</caption>')
+    _stat_row('Number of scan points', str(len(scanner.scan_results)))
+    _stat_row('Scanned parameters', ', '.join(scanner.scan_ranges.keys()))
+
+    for param_name, values in scanner.scan_ranges.items():
+        _stat_row(f'{param_name} range',
+                  f'{values[0]:.6g} to {values[-1]:.6g} ({len(values)} points)')
+    add('</table>')
+
+    successful = sum(1 for r in scanner.scan_results if r.success)
+    failed = len(scanner.scan_results) - successful
+
+    add('<table class="jp-toc-ignore">')
+    add('<caption>Scan Statistics</caption>')
+    _stat_row('Total points', str(len(scanner.scan_results)))
+    _stat_row('Successful fits', str(successful))
+    _stat_row('Failed fits', str(failed))
+    add('</table>')
+
+    if show_best and scanner.scan_results:
+        best = scanner.get_best_result(metric='chisqr')
+        if best:
+            add('<table class="jp-toc-ignore">')
+            add('<caption>Best Fit Result</caption>')
+
+            add('<tr><th colspan="2">Parameter Values</th></tr>')
+            for name, value in best.param_values.items():
+                _stat_row(name, f'{value:.6g}')
+
+            add('<tr><th colspan="2">Fit Metrics</th></tr>')
+            if best.chisqr is not None:
+                _stat_row('chi-square', gformat(best.chisqr))
+            if best.redchi is not None:
+                _stat_row('reduced chi-square', gformat(best.redchi))
+            if best.aic is not None:
+                _stat_row('Akaike info crit.', gformat(best.aic))
+            if best.bic is not None:
+                _stat_row('Bayesian info crit.', gformat(best.bic))
+            add('</table>')
+
+    if scanner.scan_results:
+        add('<table class="jp-toc-ignore">')
+        add(f'<caption>Scan Results (sorted by {sort_by})</caption>')
+
+        param_names = list(scanner.scan_ranges.keys())
+        headers = ['#'] + param_names + ['chisqr', 'redchi', 'AIC', 'BIC', 'Success']
+        hrow = trow(headers, cat='th')
+        add(f"<tr>{''.join(hrow)}</tr>")
+
+        results_to_show = scanner.scan_results
+
+        if sort_by in ['chisqr', 'redchi', 'aic', 'bic']:
+            def sort_key(r):
+                val = getattr(r, sort_by)
+                return float('inf') if val is None else val
+            results_to_show = sorted(results_to_show, key=sort_key)
+
+        results_to_show = results_to_show[:max_rows]
+
+        for i, result in enumerate(results_to_show, 1):
+            row = [str(i)]
+
+            for name in param_names:
+                val = result.param_values.get(name, np.nan)
+                row.append(f'{val:.6g}')
+
+            chisqr = result.chisqr if result.chisqr is not None else float('nan')
+            redchi = result.redchi if result.redchi is not None else float('nan')
+            aic = result.aic if result.aic is not None else float('nan')
+            bic = result.bic if result.bic is not None else float('nan')
+
+            row.extend([
+                f'{chisqr:.4g}',
+                f'{redchi:.4g}',
+                f'{aic:.4g}',
+                f'{bic:.4g}',
+                str(result.success)
+            ])
+
+            hrow = trow(row, cat='td')
+            add(f"<tr>{''.join(hrow)}</tr>")
+
+        if len(scanner.scan_results) > max_rows:
+            add(f'<tr><td colspan="{len(headers)}" style="text-align:center">'
+                f'... and {len(scanner.scan_results) - max_rows} more results</td></tr>')
+
+        add('</table>')
+
+    add('</div>')
+    return ''.join(html)
+
+
+def report_scan(scanner, **kws):
+    """Print a report of the parameter scan results."""
+    print(scan_report(scanner, **kws))

@@ -38,8 +38,17 @@ from asteval import Interpreter
 from .confidence import conf_interval, conf_interval2d
 from .minimizer import Minimizer, MinimizerException, minimize
 from .parameter import Parameter, Parameters, create_params
-from .printfuncs import ci_report, fit_report, report_ci, report_fit
+from .printfuncs import (
+    ci_report,
+    fit_report,
+    report_ci,
+    report_fit,
+    report_scan,
+    scan_report,
+    scan_report_html_table,
+)
 from .model import Model, CompositeModel
+from .scanner import ParameterScan, ScanResult, scan_parameters
 from . import lineshapes, models
 
 from lmfit.version import version as __version__
