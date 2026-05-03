@@ -29,10 +29,13 @@ def eggholder(params):
 
 
 def residual_quadratic(params):
-    """Simple quadratic function for testing."""
-    x = params['x'].value
-    y = params['y'].value
-    return (x - 1.0)**2 + (y - 2.0)**2
+    """Simple quadratic function for testing.
+
+    Uses x0 and x1 as parameter names to be consistent with other test functions.
+    """
+    x0 = params['x0'].value
+    x1 = params['x1'].value
+    return (x0 - 1.0)**2 + (x1 - 2.0)**2
 
 
 class TestUnifiedFunAccess:
