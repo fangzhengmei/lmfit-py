@@ -316,6 +316,132 @@ class MinimizerResult:
         self.aic = _neg2_log_likel + 2 * self.nvarys
         self.bic = _neg2_log_likel + np.log(self.ndata) * self.nvarys
 
+    @property
+    def fun(self):
+        """Return the objective function value at the solution.
+
+        This property provides a unified interface to access the objective
+        function value across different optimization backends.
+
+        Returns
+        -------
+        float or None
+            The objective function value if available, otherwise None.
+
+        Notes
+        -----
+        Different optimization backends store this value with different
+        attribute names. This property unifies access by checking in
+        the following order:
+
+        1. Direct `fun` attribute (from scalar_minimize, least_squares)
+        2. Method-specific prefixed attributes:
+           - `shgo_fun` (shgo method)
+           - `da_fun` (dual_annealing method)
+           - `direct_fun` (direct method)
+           - `brute_fval` (brute method)
+           - `ampgo_fval` (ampgo method)
+
+        """
+        if '_fun' in self.__dict__:
+            return self.__dict__['_fun']
+        for attr in ('shgo_fun', 'da_fun', 'direct_fun',
+                     'brute_fval', 'ampgo_fval'):
+            if attr in self.__dict__:
+                return self.__dict__[attr]
+        return None
+
+    @fun.setter
+    def fun(self, value):
+        """Set the objective function value."""
+        self._fun = value
+
+    @property
+    def x(self):
+        """Return the solution (optimal parameter values in internal space).
+
+        This property provides a unified interface to access the optimal
+        parameter values across different optimization backends.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            The optimal parameter values in internal (unbounded) space if
+            available, otherwise None.
+
+        Notes
+        -----
+        Different optimization backends store this value with different
+        attribute names. This property unifies access by checking in
+        the following order:
+
+        1. Direct `x` attribute (from scalar_minimize, least_squares)
+        2. Method-specific prefixed attributes:
+           - `shgo_x` (shgo method)
+           - `da_x` (dual_annealing method)
+           - `direct_x` (direct method)
+           - `brute_x0` (brute method)
+           - `ampgo_x0` (ampgo method)
+
+        See Also
+        --------
+        params : The best-fit Parameters with values in external space.
+
+        """
+        if '_x' in self.__dict__:
+            return self.__dict__['_x']
+        for attr in ('shgo_x', 'da_x', 'direct_x',
+                     'brute_x0', 'ampgo_x0'):
+            if attr in self.__dict__:
+                return self.__dict__[attr]
+        return None
+
+    @x.setter
+    def x(self, value):
+        """Set the solution (optimal parameter values in internal space)."""
+        self._x = value
+
+    @property
+    def nit(self):
+        """Return the number of iterations performed by the optimizer.
+
+        This property provides a unified interface to access the number
+        of iterations across different optimization backends.
+
+        Returns
+        -------
+        int or None
+            The number of iterations if available, otherwise None.
+
+        Notes
+        -----
+        Different optimization backends store this value with different
+        attribute names. This property unifies access by checking in
+        the following order:
+
+        1. Direct `nit` attribute (from scalar_minimize methods)
+        2. Method-specific prefixed attributes:
+           - `shgo_nit` (shgo method)
+           - `da_nit` (dual_annealing method)
+           - `direct_nit` (direct method)
+
+        Not all optimization methods report the number of iterations.
+        For example, the `leastsq`, `brute`, and `ampgo` methods do
+        not provide this information.
+
+        """
+        if '_nit' in self.__dict__:
+            return self.__dict__['_nit']
+        for attr in ('shgo_nit', 'da_nit', 'direct_nit'):
+            if attr in self.__dict__:
+                return self.__dict__[attr]
+        return None
+
+    @nit.setter
+    def nit(self, value):
+        """Set the number of iterations."""
+        self._nit = value
+
     def _repr_html_(self, show_correl=True, min_correl=0.1):
         """Return a HTML representation of parameters data."""
         report = fitreport_html_table(self, show_correl=show_correl,
@@ -1784,7 +1910,13 @@ class Minimizer:
             pass
 
         if not result.aborted:
-            result.message = ret.message
+            if isinstance(ret, dict):
+                for attr, value in ret.items():
+                    setattr(result, attr, value)
+            else:
+                for attr in dir(ret):
+                    if not attr.startswith('_'):
+                        setattr(result, attr, getattr(ret, attr))
             result.residual = self.__residual(ret.x)
             result.nfev -= 1
         elif result.nfev > self.max_nfev-5:
